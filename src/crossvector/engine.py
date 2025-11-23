@@ -27,6 +27,7 @@ class VectorEngine:
         embedding_adapter: EmbeddingAdapter,
         db_adapter: VectorDBAdapter,
         collection_name: str = settings.ASTRA_DB_COLLECTION_NAME,
+        store_text: bool = settings.VECTOR_STORE_TEXT,
     ):
         """
         Initializes the engine with specific adapters.
@@ -35,21 +36,25 @@ class VectorEngine:
             embedding_adapter: An instance of an EmbeddingAdapter subclass.
             db_adapter: An instance of a VectorDBAdapter subclass.
             collection_name: The name of the collection to work with.
+            store_text: Whether to store the original text content in the database.
         """
         self.embedding_adapter = embedding_adapter
         self.db_adapter = db_adapter
         self.collection_name = collection_name
+        self.store_text = store_text
 
         log.info(
             f"VectorEngine initialized with "
-            f"EmbeddingAdapter: {embedding_adapter.__class__.__name__} and "
-            f"DBAdapter: {db_adapter.__class__.__name__}."
+            f"EmbeddingAdapter: {embedding_adapter.__class__.__name__}, "
+            f"DBAdapter: {db_adapter.__class__.__name__}, "
+            f"store_text: {store_text}."
         )
 
         # Initialize the database collection
         self.db_adapter.initialize(
             collection_name=self.collection_name,
             embedding_dimension=self.embedding_adapter.embedding_dimension,
+            store_text=self.store_text,
         )
 
     def upsert(self, params: UpsertRequest) -> Dict[str, Any]:
@@ -66,12 +71,19 @@ class VectorEngine:
 
         docs_to_insert = []
         for i, doc in enumerate(params.documents):
+            # Add timestamps to metadata
+            metadata_with_timestamps = {
+                **doc.metadata,
+                "created_timestamp": doc.created_timestamp,
+                "updated_timestamp": doc.updated_timestamp,
+            }
+
             docs_to_insert.append(
                 {
                     "_id": doc.id,
                     "text": doc.text,
-                    "$vector": embeddings[i],
-                    **doc.metadata,
+                    "vector": embeddings[i],
+                    **metadata_with_timestamps,
                 }
             )
 

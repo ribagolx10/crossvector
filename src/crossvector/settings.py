@@ -43,6 +43,7 @@ class CrossVectorSettings(BaseSettings):
 
     # Vector settings
     VECTOR_METRIC: str = "cosine"
+    VECTOR_STORE_TEXT: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

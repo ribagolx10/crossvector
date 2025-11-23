@@ -38,7 +38,8 @@ class MilvusDBAdapter:
             log.info(f"MilvusClient initialized with uri={uri}")
         return self._client
 
-    def initialize(self, collection_name: str, embedding_dimension: int, metric: str = None):
+    def initialize(self, collection_name: str, embedding_dimension: int, metric: str = None, store_text: bool = True):
+        self.store_text = store_text
         if metric is None:
             metric = os.getenv("VECTOR_METRIC", VectorMetric.COSINE)
         self.get_collection(collection_name, embedding_dimension, metric)
@@ -50,27 +51,45 @@ class MilvusDBAdapter:
         """
         self.collection_name = collection_name
         self.embedding_dimension = embedding_dimension
+        # Default store_text if not set
+        if not hasattr(self, "store_text"):
+            self.store_text = True
+
         metric_key = VECTOR_METRIC_MAP.get(metric, VectorMetric.COSINE)
         info = self._get_collection_info(collection_name)
         index_info = self._get_index_info(collection_name)
+
+        # Check schema compatibility (simplified)
         has_vector_index = False
         if index_info:
             for idx in index_info:
                 if idx.get("field_name") == "vector":
                     has_vector_index = True
                     break
+
         need_create = False
         if info:
             fields = info.get("fields", [])
-            doc_id_field = next((f for f in fields if f["name"] == "doc_id"), None)
-            if not doc_id_field or not has_vector_index:
+            field_names = [f["name"] for f in fields]
+            # Check if required fields exist
+            if "doc_id" not in field_names or "vector" not in field_names:
                 self.client.drop_collection(collection_name=collection_name)
-                log.info(f"Milvus collection '{collection_name}' dropped due to wrong schema or missing index.")
+                log.info(f"Milvus collection '{collection_name}' dropped due to wrong schema.")
+                need_create = True
+            elif self.store_text and "text" not in field_names:
+                # If we want to store text but the collection doesn't have it, we must recreate
+                self.client.drop_collection(collection_name=collection_name)
+                log.info(f"Milvus collection '{collection_name}' dropped to add 'text' field.")
+                need_create = True
+            elif not has_vector_index:
+                # Index missing/wrong
+                self.client.drop_collection(collection_name=collection_name)
                 need_create = True
             else:
-                log.info(f"Milvus collection '{collection_name}' already exists with correct schema and index.")
+                log.info(f"Milvus collection '{collection_name}' already exists with correct schema.")
         else:
             need_create = True
+
         if need_create:
             schema = self._build_schema(embedding_dimension)
             self.client.create_collection(collection_name=collection_name, schema=schema)
@@ -94,6 +113,9 @@ class MilvusDBAdapter:
         schema = self.client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="doc_id", datatype=DataType.VARCHAR, max_length=255, is_primary=True)
         schema.add_field(field_name="vector", datatype=DataType.FLOAT_VECTOR, dim=embedding_dimension)
+        if self.store_text:
+            # Max length for VARCHAR in Milvus is 65535
+            schema.add_field(field_name="text", datatype=DataType.VARCHAR, max_length=65535)
         schema.add_field(field_name="metadata", datatype=DataType.JSON)
         return schema
 
@@ -122,21 +144,39 @@ class MilvusDBAdapter:
         for doc in documents:
             doc_id = doc.get("_id") or doc.get("id")
             vector = doc.get("$vector") or doc.get("vector")
-            # Extract metadata (all fields except _id and $vector)
-            metadata = {k: v for k, v in doc.items() if k not in ("_id", "$vector", "id", "vector")}
-            data.append({"doc_id": doc_id, "vector": vector, "metadata": metadata})
+
+            item = {"doc_id": doc_id, "vector": vector}
+
+            if self.store_text:
+                text = doc.get("text", "")
+                # Truncate if too long (Milvus limit)
+                if len(text) > 65535:
+                    text = text[:65535]
+                item["text"] = text
+
+            # Extract metadata (all fields except _id, $vector, text)
+            metadata = {k: v for k, v in doc.items() if k not in ("_id", "$vector", "id", "vector", "text")}
+            item["metadata"] = metadata
+            data.append(item)
+
         self.client.insert(collection_name=self.collection_name, data=data)
         log.info(f"Inserted {len(data)} vectors into Milvus.")
 
-    def search(self, vector: List[float], limit: int, fields: Set[str]) -> List[Dict[str, Any]]:
+    def search(self, vector: List[float], limit: int, fields: Set[str] | None = None) -> List[Dict[str, Any]]:
         self.client.load_collection(collection_name=self.collection_name)
         if not self.collection_name:
             raise ValueError("Collection name must be set. Call initialize().")
+
+        output_fields = ["metadata"]
+        if self.store_text:
+            if fields is None or "text" in fields:
+                output_fields.append("text")
+
         results = self.client.search(
             collection_name=self.collection_name,
             data=[vector],
             limit=limit,
-            output_fields=list(fields) if fields else ["metadata"],
+            output_fields=output_fields,
         )
         # MilvusClient returns list of dicts
         return results[0] if results else []

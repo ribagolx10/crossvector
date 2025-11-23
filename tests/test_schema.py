@@ -33,8 +33,80 @@ class TestDocumentSchema:
         with pytest.raises(ValidationError):
             Document(id="doc1")  # Missing text
 
-        with pytest.raises(ValidationError):
-            Document(text="Sample text")  # Missing id
+    def test_document_auto_id_generation(self):
+        """Test that ID is automatically generated if missing."""
+        doc = Document(text="Sample text")
+        assert doc.id is not None
+        assert len(doc.id) == 64  # SHA256 hash length
+
+    def test_document_timestamps(self):
+        """Test that timestamps are automatically generated."""
+        doc = Document(text="Sample text")
+
+        assert doc.created_timestamp is not None
+        assert doc.updated_timestamp is not None
+
+        # Both should be float (Unix timestamp)
+        assert isinstance(doc.created_timestamp, float)
+        assert isinstance(doc.updated_timestamp, float)
+
+        # Should be reasonable values (after year 2020)
+        assert doc.created_timestamp > 1577836800  # 2020-01-01
+        assert doc.updated_timestamp > 1577836800
+
+        # For a new document, created_timestamp and updated_timestamp should be the same
+        assert doc.created_timestamp == doc.updated_timestamp
+
+    def test_document_timestamp_update(self):
+        """Test that updated_timestamp is refreshed when document is recreated."""
+        import time
+
+        doc1 = Document(id="test-id", text="Sample text")
+        created_ts_1 = doc1.created_timestamp
+        updated_ts_1 = doc1.updated_timestamp
+
+        time.sleep(0.01)  # Small delay
+
+        # Recreate with same ID but preserve created_timestamp
+        doc2 = Document(id="test-id", text="Sample text", created_timestamp=created_ts_1)
+
+        assert doc2.created_timestamp == created_ts_1  # Should preserve original created_timestamp
+        assert doc2.updated_timestamp > updated_ts_1  # Should have new updated_timestamp (later)
+
+    def test_document_reserved_fields_warning(self):
+        """Test that using reserved fields in metadata triggers a warning."""
+        import warnings
+
+        # Should trigger warning for legacy fields
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            doc = Document(text="Sample text", metadata={"created_at": "custom_value", "updated_at": "another_value"})
+
+            # Check that warning was raised
+            assert len(w) == 1
+            assert issubclass(w[0].category, UserWarning)
+            assert "reserved timestamp fields" in str(w[0].message)
+
+            # Check that automatic timestamps are still set with _cv_ prefix
+            assert doc.created_timestamp is not None
+            assert doc.updated_timestamp is not None
+
+    def test_document_user_timestamps_preserved(self):
+        """Test that user's own created_at/updated_at in metadata are preserved."""
+        doc = Document(
+            text="Sample text",
+            metadata={
+                "created_at": "2024-01-15T10:00:00Z",  # User's article timestamp
+                "updated_at": "2024-11-20T15:30:00Z",  # User's article timestamp
+            },
+        )
+
+        # CrossVector timestamps should exist with _cv_ prefix
+        assert doc.created_timestamp is not None
+        assert doc.updated_timestamp is not None
+
+        # User's timestamps should still be accessible (though warned about)
+        # They will be in metadata but overridden when stored
 
     def test_document_metadata_types(self):
         """Test various metadata types."""

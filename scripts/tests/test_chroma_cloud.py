@@ -32,7 +32,7 @@ except Exception as e:
 
 # Insert docs
 docs = [
-    {"_id": str(i), "$vector": emb, "text": text, "metadata": {"source": "test"}}
+    {"_id": str(i), "vector": emb, "text": text, "metadata": {"source": "test"}}
     for i, (emb, text) in enumerate(zip(embeddings, texts))
 ]
 adapter.upsert(docs)

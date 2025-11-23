@@ -2,13 +2,10 @@
 Test script: Insert docs into Milvus using OpenAI text-embedding-3-small
 """
 
-from dotenv import load_dotenv
+import time
 
 from crossvector.dbs.milvus import MilvusDBAdapter
 from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
-
-# Load .env
-load_dotenv()
 
 # Example docs
 texts = [
@@ -26,11 +23,14 @@ milvus = MilvusDBAdapter()
 milvus.initialize(collection_name="test_vectors", embedding_dimension=embedder.embedding_dimension)
 
 docs = [
-    {"_id": str(i), "$vector": emb, "text": text, "metadata": {"source": "test"}}
+    {"_id": str(i), "vector": emb, "text": text, "metadata": {"source": "test"}}
     for i, (emb, text) in enumerate(zip(embeddings, texts))
 ]
 milvus.upsert(docs)
 print(f"Inserted {len(docs)} documents into Milvus.")
+
+
+time.sleep(5)  # Wait for indexing
 
 # 3. Search test
 results = milvus.search(embeddings[0], limit=2, fields={"text", "metadata"})

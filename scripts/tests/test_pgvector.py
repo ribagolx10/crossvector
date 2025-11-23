@@ -22,11 +22,12 @@ embeddings = embedder.get_embeddings(texts)
 
 # 2. Initialize PGVector
 pgvector = PGVectorAdapter()
+pgvector.drop_collection("test_vectors")
 pgvector.initialize(table_name="test_vectors", embedding_dimension=embedder.embedding_dimension)
 
 # 3. Insert docs
 docs = [
-    {"_id": str(i), "$vector": emb, "text": text, "metadata": {"source": "test"}}
+    {"_id": str(i), "vector": emb, "text": text, "metadata": {"source": "test"}}
     for i, (emb, text) in enumerate(zip(embeddings, texts))
 ]
 pgvector.upsert(docs)

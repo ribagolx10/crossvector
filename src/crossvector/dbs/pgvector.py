@@ -1,6 +1,5 @@
 """
 Concrete adapter for pgvector (PostgreSQL vector extension).
-Design giống các adapter khác: lazy client, collection, interface chuẩn.
 """
 
 import json
@@ -46,7 +45,8 @@ class PGVectorAdapter:
             self._cursor = self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         return self._cursor
 
-    def initialize(self, table_name: str, embedding_dimension: int, metric: str = "cosine"):
+    def initialize(self, table_name: str, embedding_dimension: int, metric: str = "cosine", store_text: bool = True):
+        self.store_text = store_text
         self.get_collection(table_name, embedding_dimension, metric)
 
     def get_collection(self, table_name: str, embedding_dimension: int, metric: str = VectorMetric.COSINE) -> Any:
@@ -56,56 +56,88 @@ class PGVectorAdapter:
         """
         self.table_name = table_name
         self.embedding_dimension = embedding_dimension
+        if not hasattr(self, "store_text"):
+            self.store_text = True
+
         create_table_sql = f"""
         CREATE TABLE IF NOT EXISTS {table_name} (
             id SERIAL PRIMARY KEY,
             doc_id VARCHAR(255) UNIQUE,
             vector vector({embedding_dimension}),
+            text TEXT,
             metadata JSONB
         );
         """
         self.cursor.execute(create_table_sql)
         self.conn.commit()
-        log.info(f"PGVector table '{table_name}' initialized.")
+        log.info(f"PGVector table '{table_name}' initialized. Store text: {self.store_text}")
         return table_name
+
+    def drop_collection(self, table_name: str):
+        """Drops the PGVector table if it exists."""
+        sql = f"DROP TABLE IF EXISTS {table_name}"
+        self.cursor.execute(sql)
+        self.conn.commit()
+        log.info(f"PGVector table '{table_name}' dropped.")
 
     def upsert(self, documents: List[Dict[str, Any]]):
         """
         Inserts a batch of documents into the PGVector table.
         Each document should follow the standard format:
-        {"_id": str, "$vector": List[float], "text": str, ...metadata}
+        {"_id": str, "vector": List[float], "text": str, ...metadata}
         """
         if not self.table_name:
             raise ValueError("Table name must be set. Call initialize().")
         for doc in documents:
             doc_id = doc.get("_id") or doc.get("id")
             vector = doc.get("$vector") or doc.get("vector")
-            # Extract metadata (all fields except _id and $vector)
-            metadata = {k: v for k, v in doc.items() if k not in ("_id", "$vector", "id", "vector")}
+            text = doc.get("text") if self.store_text else None
+
+            # Extract metadata (all fields except _id, $vector, and text)
+            metadata = {k: v for k, v in doc.items() if k not in ("_id", "$vector", "id", "vector", "text")}
             metadata_json = json.dumps(metadata)
-            sql = f"INSERT INTO {self.table_name} (doc_id, vector, metadata) VALUES (%s, %s, %s)"
-            self.cursor.execute(sql, (doc_id, vector, metadata_json))
+
+            sql = f"INSERT INTO {self.table_name} (doc_id, vector, text, metadata) VALUES (%s, %s, %s, %s) ON CONFLICT (doc_id) DO UPDATE SET vector = EXCLUDED.vector, text = EXCLUDED.text, metadata = EXCLUDED.metadata"
+            self.cursor.execute(sql, (doc_id, vector, text, metadata_json))
         self.conn.commit()
         log.info(f"Inserted {len(documents)} vectors into PGVector.")
 
-    def search(self, vector: List[float], limit: int, fields: Set[str]) -> List[Dict[str, Any]]:
+    def search(self, vector: List[float], limit: int, fields: Set[str] | None = None) -> List[Dict[str, Any]]:
         if not self.table_name:
             raise ValueError("Table name must be set. Call initialize().")
-        # Cast Python list to PostgreSQL vector type
-        sql = f"SELECT id, metadata, vector <-> %s::vector AS score FROM {self.table_name} ORDER BY score ASC LIMIT %s"
+
+        # Construct SELECT query based on requested fields
+        # Always get id, score. Get text/metadata if requested or if fields is None (default all)
+        select_fields = ["doc_id AS id", "vector <-> %s::vector AS score"]
+
+        if fields is None or "text" in fields:
+            select_fields.append("text")
+        if fields is None or "metadata" in fields:
+            select_fields.append("metadata")
+
+        sql = f"SELECT {', '.join(select_fields)} FROM {self.table_name} ORDER BY score ASC LIMIT %s"
         self.cursor.execute(sql, (vector, limit))
         results = self.cursor.fetchall()
-        return [{"id": r["id"], "score": r["score"], "metadata": r["metadata"]} for r in results]
+
+        out = []
+        for r in results:
+            item = {"id": r["id"], "score": r["score"]}
+            if "text" in r:
+                item["text"] = r["text"]
+            if "metadata" in r:
+                item["metadata"] = r["metadata"]
+            out.append(item)
+        return out
 
     def get(self, id: str) -> Dict[str, Any] | None:
         """Retrieves a document by its doc_id."""
         if not self.table_name:
             raise ValueError("Table name must be set. Call initialize().")
-        sql = f"SELECT doc_id, vector, metadata FROM {self.table_name} WHERE doc_id = %s"
+        sql = f"SELECT doc_id, vector, text, metadata FROM {self.table_name} WHERE doc_id = %s"
         self.cursor.execute(sql, (id,))
         result = self.cursor.fetchone()
         if result:
-            return {"_id": result["doc_id"], "$vector": result["vector"], **result["metadata"]}
+            return {"_id": result["doc_id"], "vector": result["vector"], "text": result["text"], **result["metadata"]}
         return None
 
     def count(self) -> int:

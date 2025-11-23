@@ -36,14 +36,19 @@ test_docs = [
 ]
 
 
-def test_engine(db_name: str, db_adapter, embedding_adapter, collection_name: str):
+def test_engine(db_name: str, db_adapter, embedding_adapter, collection_name: str, is_pgvector: bool = False):
     """Test VectorEngine with a specific database adapter."""
     print(f"\n{'=' * 80}")
     print(f"Testing {db_name} with {embedding_adapter.model_name}")
     print(f"{'=' * 80}")
 
-    # Initialize engine
-    engine = VectorEngine(embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name=collection_name)
+    # Initialize engine (PGVector uses table_name instead of collection_name)
+    if is_pgvector:
+        engine = VectorEngine(embedding_adapter=embedding_adapter, db_adapter=db_adapter, table_name=collection_name)
+    else:
+        engine = VectorEngine(
+            embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name=collection_name
+        )
 
     # Clean up existing data (if collection exists, drop it)
     try:
@@ -54,7 +59,12 @@ def test_engine(db_name: str, db_adapter, embedding_adapter, collection_name: st
         print(f"Note: Could not drop collection (may not exist): {e}")
 
     # Re-initialize after dropping
-    engine = VectorEngine(embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name=collection_name)
+    if is_pgvector:
+        engine = VectorEngine(embedding_adapter=embedding_adapter, db_adapter=db_adapter, table_name=collection_name)
+    else:
+        engine = VectorEngine(
+            embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name=collection_name
+        )
 
     # Test 1: Upsert documents
     print("\n1. Testing upsert...")
@@ -78,9 +88,14 @@ def test_engine(db_name: str, db_adapter, embedding_adapter, collection_name: st
     results = engine.search(SearchRequest(query="AI and machine learning", limit=2))
     print(f"✓ Found {len(results)} results")
     for i, result in enumerate(results, 1):
-        similarity = result.get("$similarity", "N/A")
-        text = result.get("text", "N/A")[:50]
-        print(f"  {i}. Similarity: {similarity:.4f if isinstance(similarity, float) else similarity}, Text: {text}...")
+        score = result.get("score", "N/A")
+        text = result.get("text", "N/A")
+        if text != "N/A":
+            text = text[:50]
+        if isinstance(score, (int, float)):
+            print(f"  {i}. Score: {score:.4f}, Text: {text}...")
+        else:
+            print(f"  {i}. Score: {score}, Text: {text}...")
 
     # Test 5: Delete one
     print("\n5. Testing delete_one...")
@@ -135,7 +150,7 @@ def main():
 
     # Test PGVector (if available)
     try:
-        test_engine("PGVector", PGVectorAdapter(), openai_embedder, "test_crossvector_integration")
+        test_engine("PGVector", PGVectorAdapter(), openai_embedder, "test_crossvector_integration", is_pgvector=True)
     except Exception as e:
         print(f"\n❌ PGVector test failed: {e}")
 

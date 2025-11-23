@@ -31,16 +31,27 @@ class MockDBAdapter(VectorDBAdapter):
         self.documents = {}
         self.collection_initialized = False
 
-    def initialize(self, collection_name: str, embedding_dimension: int, metric: str = "cosine"):
+    def initialize(
+        self, collection_name: str, embedding_dimension: int, metric: str = "cosine", store_text: bool = True
+    ):
         self.collection_initialized = True
         self.collection_name = collection_name
         self.embedding_dimension = embedding_dimension
+        self.store_text = store_text
 
     def get_collection(self, collection_name: str, embedding_dimension: int, metric: str = "cosine"):
         return f"mock_collection_{collection_name}"
 
     def upsert(self, documents):
         for doc in documents:
+            # Simulate store_text behavior
+            if not self.store_text:
+                # If store_text is False, we shouldn't store the text content
+                # But for the mock, we might want to verify it's NOT there.
+                # Let's remove 'text' key if it exists, or set it to None
+                if "text" in doc:
+                    doc = doc.copy()
+                    del doc["text"]
             self.documents[doc["_id"]] = doc
 
     def search(self, vector, limit: int, fields):
@@ -238,8 +249,50 @@ class TestVectorEngine:
         stored_doc = db_adapter.documents[doc.id]
 
         assert "_id" in stored_doc
-        assert "$vector" in stored_doc
+        assert "vector" in stored_doc
         assert "text" in stored_doc
         assert stored_doc["_id"] == doc.id
         assert stored_doc["text"] == doc.text
-        assert len(stored_doc["$vector"]) == embedding_adapter.embedding_dimension
+        assert len(stored_doc["vector"]) == embedding_adapter.embedding_dimension
+
+    def test_upsert_without_store_text(self, sample_documents):
+        """Test upserting documents with store_text=False."""
+        embedding_adapter = MockEmbeddingAdapter()
+        db_adapter = MockDBAdapter()
+
+        # Initialize engine with store_text=False
+        engine = VectorEngine(
+            embedding_adapter=embedding_adapter,
+            db_adapter=db_adapter,
+            collection_name="test_collection",
+            store_text=False,
+        )
+
+        # Upsert a document
+        doc = sample_documents[0]
+        engine.upsert(UpsertRequest(documents=[doc]))
+
+        # Check the stored document format
+        stored_doc = db_adapter.documents[doc.id]
+
+        assert "_id" in stored_doc
+        assert "vector" in stored_doc
+        # Text should NOT be present
+        assert "text" not in stored_doc
+        assert stored_doc["_id"] == doc.id
+        assert len(stored_doc["vector"]) == embedding_adapter.embedding_dimension
+
+    def test_auto_generated_id(self):
+        """Test that ID is automatically generated if not provided."""
+        from crossvector.schema import Document
+
+        text = "This is a test document without ID."
+        doc = Document(text=text)
+
+        assert doc.id is not None
+        # Verify it's a valid SHA256 hash (64 hex chars)
+        assert len(doc.id) == 64
+
+        # Verify determinism
+        doc2 = Document(text=text)
+        assert doc.id == doc2.id

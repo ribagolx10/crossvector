@@ -92,12 +92,13 @@ class ChromaDBAdapter:
             raise ValueError("Collection name and embedding dimension must be set. Call initialize().")
         return self.get_collection(self.collection_name, self.embedding_dimension)
 
-    def initialize(self, collection_name: str, embedding_dimension: int, metric: str = None):
+    def initialize(self, collection_name: str, embedding_dimension: int, metric: str = None, store_text: bool = True):
         """
         Creates or retrieves a ChromaDB collection.
         """
         import os
 
+        self.store_text = store_text
         if metric is None:
             metric = os.getenv("VECTOR_METRIC", VectorMetric.COSINE)
         self.get_collection(collection_name, embedding_dimension, metric)
@@ -109,6 +110,10 @@ class ChromaDBAdapter:
         """
         self.collection_name = collection_name
         self.embedding_dimension = embedding_dimension
+        # Default store_text if not set
+        if not hasattr(self, "store_text"):
+            self.store_text = True
+
         self.metric = VECTOR_METRIC_MAP.get(metric, VectorMetric.COSINE)
         if self._collection is not None and getattr(self._collection, "name", None) == collection_name:
             return self._collection
@@ -120,7 +125,6 @@ class ChromaDBAdapter:
                 name=collection_name,
                 metadata={"hnsw:space": self.metric},
                 embedding_function=None,
-                dimension=embedding_dimension,
             )
             log.info(f"ChromaDB collection '{collection_name}' created.")
         return self._collection
@@ -137,26 +141,58 @@ class ChromaDBAdapter:
             return
         ids = [doc.get("_id") or doc.get("id") for doc in documents]
         vectors = [doc.get("$vector") or doc.get("vector") for doc in documents]
-        # ChromaDB expects metadata as dict, so extract all fields except _id and $vector
+
+        # Handle text storage
+        texts = None
+        if self.store_text:
+            texts = [doc.get("text") for doc in documents]
+
+        # ChromaDB expects metadata as dict, so extract all fields except _id, $vector, and text
         metadatas = []
         for doc in documents:
-            metadata = {k: v for k, v in doc.items() if k not in ("_id", "$vector", "id", "vector")}
-            metadatas.append(metadata)
-        self.collection.add(ids=ids, embeddings=vectors, metadatas=metadatas)
+            metadata = {k: v for k, v in doc.items() if k not in ("_id", "$vector", "id", "vector", "text")}
+            # Flatten metadata if it contains nested dicts (Chroma doesn't support nested metadata)
+            flat_metadata = {}
+            for k, v in metadata.items():
+                if isinstance(v, dict):
+                    for sub_k, sub_v in v.items():
+                        flat_metadata[f"{k}.{sub_k}"] = sub_v
+                else:
+                    flat_metadata[k] = v
+            metadatas.append(flat_metadata)
+
+        self.collection.add(ids=ids, embeddings=vectors, metadatas=metadatas, documents=texts)
         log.info(f"Inserted {len(ids)} vectors into ChromaDB.")
 
-    def search(self, vector: List[float], limit: int, fields: Set[str]) -> List[Dict[str, Any]]:
+    def search(self, vector: List[float], limit: int, fields: Set[str] | None = None) -> List[Dict[str, Any]]:
         """
         Performs a vector similarity search in ChromaDB.
         """
         if not self.collection:
             raise ConnectionError("ChromaDB collection is not initialized.")
-        results = self.collection.query(query_embeddings=[vector], n_results=limit)
-        # Chroma returns ids, distances, metadatas
-        return [
-            {"id": id_, "score": dist, "metadata": meta}
-            for id_, dist, meta in zip(results["ids"], results["distances"], results["metadatas"])
-        ]
+
+        # Determine what to include
+        include = ["metadatas", "distances"]
+        if self.store_text:
+            if fields is None or "text" in fields:
+                include.append("documents")
+
+        results = self.collection.query(query_embeddings=[vector], n_results=limit, include=include)
+
+        # Chroma returns ids, distances, metadatas, documents as lists of lists (one per query)
+        # We only query one vector, so take the first element
+        ids = results["ids"][0]
+        distances = results["distances"][0]
+        metadatas = results["metadatas"][0] if results["metadatas"] else [None] * len(ids)
+        documents = results["documents"][0] if results.get("documents") else [None] * len(ids)
+
+        out = []
+        for id_, dist, meta, doc in zip(ids, distances, metadatas, documents):
+            item = {"id": id_, "score": dist, "metadata": meta}
+            if doc is not None:
+                item["text"] = doc
+            out.append(item)
+        return out
 
     def get(self, id: str) -> Dict[str, Any] | None:
         """
@@ -164,7 +200,7 @@ class ChromaDBAdapter:
         """
         if not self.collection:
             raise ConnectionError("ChromaDB collection is not initialized.")
-        results = self.collection.get(ids=[id])
+        results = self.collection.get(ids=[id], include=["embeddings", "metadatas", "documents"])
         if results["ids"]:
             return {"id": results["ids"][0], "vector": results["embeddings"][0], "metadata": results["metadatas"][0]}
         return None
