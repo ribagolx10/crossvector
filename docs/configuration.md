@@ -34,5 +34,32 @@ PGVECTOR_USER=postgres
 PGVECTOR_PASSWORD=...
 
 # Vector settings
-VECTOR_METRIC=cosine
+VECTOR_METRIC=cosine                # Distance metric: cosine, dot_product, euclidean
+VECTOR_STORE_TEXT=true              # Store original text in database (true/false)
 ```
+
+## Configuration Options
+
+### Vector Settings
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `VECTOR_METRIC` | string | `cosine` | Distance metric for similarity search. Options: `cosine`, `dot_product`, `euclidean` |
+| `VECTOR_STORE_TEXT` | boolean | `true` | Whether to store original text in the database. Set to `false` to save storage space |
+
+### Storage Optimization
+
+If you're only using embeddings for search and don't need to retrieve the original text, you can disable text storage:
+
+```python
+from crossvector import VectorEngine
+
+engine = VectorEngine(
+    embedding_adapter=...,
+    db_adapter=...,
+    collection_name="my_docs",
+    store_text=False  # Don't store text, only embeddings and metadata
+)
+```
+
+This can significantly reduce storage requirements, especially for large text documents.

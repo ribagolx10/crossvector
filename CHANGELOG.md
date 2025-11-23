@@ -1,5 +1,16 @@
 # CrossVector - Changelog
 
+## [0.1.1] - 2025-11-23
+
+- Bumped package version to **0.1.1**.
+- Added beta warning and production‑risk notice in README.
+- Switched timestamps to float Unix timestamps (`created_timestamp`, `updated_timestamp`).
+- Introduced `VECTOR_STORE_TEXT` configuration option.
+- Fixed integration tests for AstraDB, ChromaDB, Milvus, and PGVector (table name handling, dimension parameter, score field).
+- Updated documentation (README, quickstart, schema, configuration) to reflect new features and usage.
+- Adjusted `.markdownlint.yaml` to disable MD060 table‑column‑style warnings.
+- Cleaned up imports and resolved lint errors (ruff E402).
+
 ## Recent Updates (2025-11-23)
 
 ### GitHub Organization Update
