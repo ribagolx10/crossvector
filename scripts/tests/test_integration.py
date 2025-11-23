@@ -3,6 +3,8 @@ Integration test script: Test VectorEngine with real cloud APIs
 This script tests the unified VectorEngine interface across different databases.
 """
 
+import time
+
 from dotenv import load_dotenv
 
 from crossvector import Document, SearchRequest, UpsertRequest, VectorEngine
@@ -36,57 +38,46 @@ test_docs = [
 ]
 
 
-def test_engine(db_name: str, db_adapter, embedding_adapter, collection_name: str, is_pgvector: bool = False):
+def test_engine(db_name: str, db_adapter, embedding_adapter, collection_name: str):
     """Test VectorEngine with a specific database adapter."""
     print(f"\n{'=' * 80}")
     print(f"Testing {db_name} with {embedding_adapter.model_name}")
     print(f"{'=' * 80}")
 
-    # Initialize engine (PGVector uses table_name instead of collection_name)
-    if is_pgvector:
-        engine = VectorEngine(embedding_adapter=embedding_adapter, db_adapter=db_adapter, table_name=collection_name)
-    else:
-        engine = VectorEngine(
-            embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name=collection_name
-        )
+    engine = VectorEngine(embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name=collection_name)
 
     # Clean up existing data (if collection exists, drop it)
     try:
-        if hasattr(db_adapter, "db") and collection_name in db_adapter.db.list_collection_names():
-            db_adapter.db.drop_collection(collection_name)
-            print(f"✓ Dropped existing collection '{collection_name}'")
+        engine.drop_collection(collection_name)
+        time.sleep(1)
+        print(f"Dropped existing collection '{collection_name}'")
     except Exception as e:
         print(f"Note: Could not drop collection (may not exist): {e}")
 
     # Re-initialize after dropping
-    if is_pgvector:
-        engine = VectorEngine(embedding_adapter=embedding_adapter, db_adapter=db_adapter, table_name=collection_name)
-    else:
-        engine = VectorEngine(
-            embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name=collection_name
-        )
+    engine = VectorEngine(embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name=collection_name)
 
     # Test 1: Upsert documents
     print("\n1. Testing upsert...")
     result = engine.upsert(UpsertRequest(documents=test_docs))
-    print(f"✓ Inserted {result['count']} documents")
+    print(f"Inserted {result['count']} documents")
 
     # Test 2: Count documents
     print("\n2. Testing count...")
     count = engine.count()
-    print(f"✓ Total documents: {count}")
+    print(f"Total documents: {count}")
     assert count == len(test_docs), f"Expected {len(test_docs)} documents, got {count}"
 
     # Test 3: Get document by ID
     print("\n3. Testing get...")
     doc = engine.get("doc1")
-    print(f"✓ Retrieved document: {doc.get('text', 'N/A')[:50]}...")
+    print(f"Retrieved document: {doc.get('text', 'N/A')[:50]}...")
     assert doc is not None, "Document not found"
 
     # Test 4: Search
     print("\n4. Testing search...")
     results = engine.search(SearchRequest(query="AI and machine learning", limit=2))
-    print(f"✓ Found {len(results)} results")
+    print(f"Found {len(results)} results")
     for i, result in enumerate(results, 1):
         score = result.get("score", "N/A")
         text = result.get("text", "N/A")
@@ -100,11 +91,11 @@ def test_engine(db_name: str, db_adapter, embedding_adapter, collection_name: st
     # Test 5: Delete one
     print("\n5. Testing delete_one...")
     deleted = engine.delete_one("doc1")
-    print(f"✓ Deleted {deleted} document(s)")
+    print(f"Deleted {deleted} document(s)")
 
     # Verify deletion
     count_after_delete = engine.count()
-    print(f"✓ Documents after deletion: {count_after_delete}")
+    print(f"Documents after deletion: {count_after_delete}")
     assert count_after_delete == len(test_docs) - 1, (
         f"Expected {len(test_docs) - 1} documents, got {count_after_delete}"
     )
@@ -112,14 +103,14 @@ def test_engine(db_name: str, db_adapter, embedding_adapter, collection_name: st
     # Test 6: Delete many
     print("\n6. Testing delete_many...")
     deleted = engine.delete_many(["doc2", "doc3"])
-    print(f"✓ Deleted {deleted} document(s)")
+    print(f"Deleted {deleted} document(s)")
 
     # Verify all deleted
     final_count = engine.count()
-    print(f"✓ Final document count: {final_count}")
+    print(f"Final document count: {final_count}")
     assert final_count == 0, f"Expected 0 documents, got {final_count}"
 
-    print(f"\n✅ All tests passed for {db_name}!")
+    print(f"\nAll tests passed for {db_name}!")
 
 
 def main():
@@ -134,25 +125,25 @@ def main():
     try:
         test_engine("AstraDB", AstraDBAdapter(), openai_embedder, "test_crossvector_integration")
     except Exception as e:
-        print(f"\n❌ AstraDB test failed: {e}")
+        print(f"\nAstraDB test failed: {e}")
 
     # Test ChromaDB
     try:
         test_engine("ChromaDB Cloud", ChromaDBAdapter(), openai_embedder, "test_crossvector_integration")
     except Exception as e:
-        print(f"\n❌ ChromaDB test failed: {e}")
+        print(f"\nChromaDB test failed: {e}")
 
     # Test Milvus
     try:
         test_engine("Milvus", MilvusDBAdapter(), openai_embedder, "test_crossvector_integration")
     except Exception as e:
-        print(f"\n❌ Milvus test failed: {e}")
+        print(f"\nMilvus test failed: {e}")
 
     # Test PGVector (if available)
     try:
-        test_engine("PGVector", PGVectorAdapter(), openai_embedder, "test_crossvector_integration", is_pgvector=True)
+        test_engine("PGVector", PGVectorAdapter(), openai_embedder, "test_crossvector_integration")
     except Exception as e:
-        print(f"\n❌ PGVector test failed: {e}")
+        print(f"\nPGVector test failed: {e}")
 
     # Test with Gemini embeddings (optional)
     try:
@@ -163,7 +154,7 @@ def main():
 
         test_engine("AstraDB with Gemini", AstraDBAdapter(), gemini_embedder, "test_crossvector_gemini")
     except Exception as e:
-        print(f"\n❌ Gemini embedding test failed: {e}")
+        print(f"\nGemini embedding test failed: {e}")
 
     print("\n" + "=" * 80)
     print("Integration tests completed!")

@@ -230,7 +230,7 @@ from crossvector.dbs.pgvector import PGVectorAdapter
 
 adapter = PGVectorAdapter()
 adapter.initialize(
-    table_name="my_vectors",
+    collection_name="my_vectors",
     embedding_dimension=1536,
     metric="cosine",
     store_text=True  # Optional

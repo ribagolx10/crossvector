@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Set
 from pymilvus import DataType, MilvusClient
 
 from crossvector.constants import VECTOR_METRIC_MAP, VectorMetric
+from crossvector.settings import settings as api_settings
 
 log = logging.getLogger(__name__)
 
@@ -38,11 +39,46 @@ class MilvusDBAdapter:
             log.info(f"MilvusClient initialized with uri={uri}")
         return self._client
 
-    def initialize(self, collection_name: str, embedding_dimension: int, metric: str = None, store_text: bool = True):
-        self.store_text = store_text
+    def initialize(
+        self, collection_name: str, embedding_dimension: int, metric: str = None, store_text: bool = None, **kwargs
+    ):
+        self.store_text = store_text or api_settings.VECTOR_STORE_TEXT
         if metric is None:
             metric = os.getenv("VECTOR_METRIC", VectorMetric.COSINE)
         self.get_collection(collection_name, embedding_dimension, metric)
+
+    def _get_collection_info(self, collection_name: str):
+        try:
+            return self.client.describe_collection(collection_name=collection_name)
+        except Exception:
+            return None
+
+    def _get_index_info(self, collection_name: str):
+        try:
+            return self.client.describe_index(collection_name=collection_name)
+        except Exception:
+            return None
+
+    def _build_schema(self, embedding_dimension: int):
+        schema = self.client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="doc_id", datatype=DataType.VARCHAR, max_length=255, is_primary=True)
+        schema.add_field(field_name="vector", datatype=DataType.FLOAT_VECTOR, dim=embedding_dimension)
+        if self.store_text:
+            # Max length for VARCHAR in Milvus is 65535
+            schema.add_field(field_name="text", datatype=DataType.VARCHAR, max_length=65535)
+        schema.add_field(field_name="metadata", datatype=DataType.JSON)
+        return schema
+
+    def _build_index_params(self, embedding_dimension: int, metric: str = VectorMetric.COSINE):
+        index_params = self.client.prepare_index_params()
+        index_params.add_index(
+            field_name="doc_id",
+            index_type="TRIE",  # For VARCHAR primary key
+        )
+        index_params.add_index(
+            field_name="vector", index_type="AUTOINDEX", metric_type=metric.upper(), params={"nlist": 1024}
+        )
+        return index_params
 
     def get_collection(self, collection_name: str, embedding_dimension: int, metric: str = VectorMetric.COSINE) -> Any:
         """
@@ -97,38 +133,10 @@ class MilvusDBAdapter:
             self.client.create_index(collection_name=collection_name, index_params=index_params)
             log.info(f"Milvus collection '{collection_name}' created with schema and index.")
 
-    def _get_collection_info(self, collection_name: str):
-        try:
-            return self.client.describe_collection(collection_name=collection_name)
-        except Exception:
-            return None
-
-    def _get_index_info(self, collection_name: str):
-        try:
-            return self.client.describe_index(collection_name=collection_name)
-        except Exception:
-            return None
-
-    def _build_schema(self, embedding_dimension: int):
-        schema = self.client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name="doc_id", datatype=DataType.VARCHAR, max_length=255, is_primary=True)
-        schema.add_field(field_name="vector", datatype=DataType.FLOAT_VECTOR, dim=embedding_dimension)
-        if self.store_text:
-            # Max length for VARCHAR in Milvus is 65535
-            schema.add_field(field_name="text", datatype=DataType.VARCHAR, max_length=65535)
-        schema.add_field(field_name="metadata", datatype=DataType.JSON)
-        return schema
-
-    def _build_index_params(self, embedding_dimension: int, metric: str = VectorMetric.COSINE):
-        index_params = self.client.prepare_index_params()
-        index_params.add_index(
-            field_name="doc_id",
-            index_type="TRIE",  # For VARCHAR primary key
-        )
-        index_params.add_index(
-            field_name="vector", index_type="AUTOINDEX", metric_type=metric.upper(), params={"nlist": 1024}
-        )
-        return index_params
+    def drop_collection(self, collection_name: str) -> bool:
+        self.client.drop_collection(collection_name=collection_name)
+        log.info(f"Milvus collection '{collection_name}' dropped.")
+        return True
 
     def upsert(self, documents: List[Dict[str, Any]]):
         """

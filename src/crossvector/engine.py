@@ -161,6 +161,12 @@ class VectorEngine:
         log.info(f"Successfully deleted {deleted_count} documents.")
         return deleted_count
 
+    def drop_collection(self, collection_name: str) -> bool:
+        """
+        Drops the collection.
+        """
+        return self.db_adapter.drop_collection(collection_name)
+
     def clear_collection(self) -> Dict[str, Any]:
         """
         Deletes all documents from the collection. A dangerous operation.

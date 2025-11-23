@@ -250,9 +250,7 @@ class TestVectorEngine:
 
         assert "_id" in stored_doc
         assert "vector" in stored_doc
-        assert "text" in stored_doc
         assert stored_doc["_id"] == doc.id
-        assert stored_doc["text"] == doc.text
         assert len(stored_doc["vector"]) == embedding_adapter.embedding_dimension
 
     def test_upsert_without_store_text(self, sample_documents):

@@ -24,6 +24,7 @@ adapter = ChromaDBAdapter()
 
 # Initialize or get collection
 try:
+    adapter.drop_collection("test_vectors")
     adapter.initialize(collection_name="test_vectors", embedding_dimension=embedder.embedding_dimension)
     print("Created collection 'test_vectors'.")
 except Exception as e:

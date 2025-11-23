@@ -21,6 +21,7 @@ embeddings = embedder.get_embeddings(texts)
 # 2. Insert into Milvus
 milvus = MilvusDBAdapter()
 milvus.initialize(collection_name="test_vectors", embedding_dimension=embedder.embedding_dimension)
+milvus.drop_collection("test_vectors")
 
 docs = [
     {"_id": str(i), "vector": emb, "text": text, "metadata": {"source": "test"}}

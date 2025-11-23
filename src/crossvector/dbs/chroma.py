@@ -11,6 +11,7 @@ import chromadb
 from chromadb.config import Settings
 
 from crossvector.constants import VECTOR_METRIC_MAP, VectorMetric
+from crossvector.settings import settings as api_settings
 
 log = logging.getLogger(__name__)
 
@@ -92,13 +93,14 @@ class ChromaDBAdapter:
             raise ValueError("Collection name and embedding dimension must be set. Call initialize().")
         return self.get_collection(self.collection_name, self.embedding_dimension)
 
-    def initialize(self, collection_name: str, embedding_dimension: int, metric: str = None, store_text: bool = True):
+    def initialize(
+        self, collection_name: str, embedding_dimension: int, metric: str = None, store_text: bool = None, **kwargs
+    ):
         """
         Creates or retrieves a ChromaDB collection.
         """
-        import os
 
-        self.store_text = store_text
+        self.store_text = store_text or api_settings.VECTOR_STORE_TEXT
         if metric is None:
             metric = os.getenv("VECTOR_METRIC", VectorMetric.COSINE)
         self.get_collection(collection_name, embedding_dimension, metric)
@@ -128,6 +130,11 @@ class ChromaDBAdapter:
             )
             log.info(f"ChromaDB collection '{collection_name}' created.")
         return self._collection
+
+    def drop_collection(self, collection_name: str) -> bool:
+        self.client.delete_collection(collection_name)
+        log.info(f"ChromaDB collection '{collection_name}' dropped.")
+        return True
 
     def upsert(self, documents: List[Dict[str, Any]]):
         """
