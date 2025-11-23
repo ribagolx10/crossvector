@@ -29,7 +29,7 @@ if "test_vectors" in db.list_collection_names():
 # Create collection and insert data
 adapter.initialize(collection_name="test_vectors", embedding_dimension=embedder.embedding_dimension)
 docs = [
-    {"_id": str(i), "$vector": emb, "text": text, "metadata": {"source": "test"}}
+    {"_id": str(i), "vector": emb, "text": text, "metadata": {"source": "test"}}
     for i, (emb, text) in enumerate(zip(embeddings, texts))
 ]
 adapter.upsert(docs)

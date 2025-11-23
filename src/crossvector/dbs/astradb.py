@@ -13,7 +13,7 @@ from astrapy.info import CollectionDefinition, CollectionVectorOptions
 
 from crossvector.abc import VectorDBAdapter
 from crossvector.constants import VECTOR_METRIC_MAP, VectorMetric
-from crossvector.settings import settings
+from crossvector.settings import settings as api_settings
 
 log = logging.getLogger(__name__)
 
@@ -35,9 +35,9 @@ class AstraDBAdapter(VectorDBAdapter):
         Lazily initializes and returns the AstraDB DataAPIClient.
         """
         if self._client is None:
-            if not settings.ASTRA_DB_APPLICATION_TOKEN:
+            if not api_settings.ASTRA_DB_APPLICATION_TOKEN:
                 raise ValueError("ASTRA_DB_APPLICATION_TOKEN is not set. Please configure it in your .env file.")
-            self._client = DataAPIClient(token=settings.ASTRA_DB_APPLICATION_TOKEN)
+            self._client = DataAPIClient(token=api_settings.ASTRA_DB_APPLICATION_TOKEN)
         return self._client
 
     @property
@@ -46,15 +46,18 @@ class AstraDBAdapter(VectorDBAdapter):
         Lazily initializes and returns the AstraDB database instance.
         """
         if self._db is None:
-            if not settings.ASTRA_DB_API_ENDPOINT:
+            if not api_settings.ASTRA_DB_API_ENDPOINT:
                 raise ValueError("ASTRA_DB_API_ENDPOINT is not set. Please configure it in your .env file.")
-            self._db = self.client.get_database(api_endpoint=settings.ASTRA_DB_API_ENDPOINT)
+            self._db = self.client.get_database(api_endpoint=api_settings.ASTRA_DB_API_ENDPOINT)
         return self._db
 
-    def initialize(self, collection_name: str, embedding_dimension: int, metric: str = None):
+    def initialize(
+        self, collection_name: str, embedding_dimension: int, metric: str = None, store_text: bool = None, **kwargs
+    ):
         """
         Creates or retrieves an AstraDB collection with the proper vector configuration.
         """
+        self.store_text = store_text or api_settings.VECTOR_STORE_TEXT
         if metric is None:
             metric = os.getenv("VECTOR_METRIC", VectorMetric.COSINE)
         self.get_collection(collection_name, embedding_dimension, metric)
@@ -69,6 +72,10 @@ class AstraDBAdapter(VectorDBAdapter):
         try:
             self.collection_name = collection_name
             self.embedding_dimension = embedding_dimension
+            # Default store_text if not set
+            if not hasattr(self, "store_text"):
+                self.store_text = True
+
             vector_metric = VECTOR_METRIC_MAP.get(metric.lower(), AstraVectorMetric.COSINE)
             # List existing collections
             existing_collections = self.db.list_collection_names()
@@ -94,6 +101,11 @@ class AstraDBAdapter(VectorDBAdapter):
             log.error(f"Failed to initialize AstraDB collection: {e}", exc_info=True)
             raise
 
+    def drop_collection(self, collection_name: str) -> bool:
+        self.db.drop_collection(collection_name)
+        log.info(f"AstraDB collection '{collection_name}' dropped.")
+        return True
+
     def upsert(self, documents: List[Dict[str, Any]]):
         """
         Inserts or updates multiple documents in the AstraDB collection.
@@ -116,15 +128,22 @@ class AstraDBAdapter(VectorDBAdapter):
                 item["$vector"] = doc["$vector"]
             elif "vector" in doc:
                 item["$vector"] = doc["vector"]
+
+            # Set text if enabled
+            if self.store_text and "text" in doc:
+                item["text"] = doc["text"]
+
             # Add all other fields as metadata
+            # In Astra DB, we can store metadata fields at root level or nested.
+            # To be consistent with other adapters, let's keep them at root but exclude special keys.
             for k, v in doc.items():
-                if k not in ("_id", "$vector", "id", "vector"):
+                if k not in ("_id", "$vector", "id", "vector", "text"):
                     item[k] = v
             items.append(item)
         result = self.collection.insert_many(items)
         return result.inserted_ids if hasattr(result, "inserted_ids") else result
 
-    def search(self, vector: List[float], limit: int, fields: Set[str]) -> List[Dict[str, Any]]:
+    def search(self, vector: List[float], limit: int, fields: Set[str] | None = None) -> List[Dict[str, Any]]:
         """
         Performs a vector similarity search in AstraDB.
         """
@@ -132,11 +151,20 @@ class AstraDBAdapter(VectorDBAdapter):
             raise ConnectionError("AstraDB collection is not initialized.")
 
         try:
+            # Construct projection
+            projection = {"$vector": 0}  # Exclude vector by default to save bandwidth
+            if fields:
+                projection = {field: 1 for field in fields}
+            elif self.store_text:
+                # If no fields specified, return everything (except vector usually, but let's follow standard)
+                # Astra returns everything by default if projection is empty/None
+                projection = {"$vector": 0}
+
             results = list(
                 self.collection.find(
                     sort={"$vector": vector},
                     limit=limit,
-                    projection={field: 1 for field in fields} if fields else {"$vector": 0},
+                    projection=projection,
                 )
             )
             log.info(f"Found {len(results)} results in AstraDB.")

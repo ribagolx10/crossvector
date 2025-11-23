@@ -38,7 +38,7 @@ class VectorDBAdapter(ABC):
     """
 
     @abstractmethod
-    def initialize(self, collection_name: str, embedding_dimension: int, metric: str = "cosine"):
+    def initialize(self, collection_name: str, embedding_dimension: int, metric: str = "cosine", **kwargs):
         """
         Initializes the database and ensures the collection is ready.
 
