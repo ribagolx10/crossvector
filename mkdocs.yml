@@ -1,0 +1,54 @@
+site_name: CrossVector
+site_description: A flexible, production-ready vector database engine with pluggable adapters.
+site_url: https://thewebscraping.github.io/crossvector/
+repo_url: https://github.com/thewebscraping/crossvector
+repo_name: thewebscraping/crossvector
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - User Guide:
+    - Quick Start: quickstart.md
+    - Configuration: configuration.md
+    - Database Adapters: adapters/databases.md
+    - Embedding Adapters: adapters/embeddings.md
+  - API Reference: api.md
+  - Contributing: contributing.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - admonition
+  - pymdownx.details
+  - attr_list
