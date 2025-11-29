@@ -23,13 +23,12 @@ def sample_texts():
 
 @pytest.fixture(scope="session")
 def sample_documents(sample_texts):
-    """Sample documents with IDs and metadata."""
-    from crossvector import Document
-
-    return [
-        Document(id=f"doc_{i}", text=text, metadata={"index": i, "category": "test"})
-        for i, text in enumerate(sample_texts)
-    ]
+    """Sample document data for testing (texts, metadatas, pks)."""
+    return {
+        "texts": sample_texts,
+        "metadatas": [{"index": i, "category": "test"} for i in range(len(sample_texts))],
+        "pks": [f"doc_{i}" for i in range(len(sample_texts))],
+    }
 
 
 @pytest.fixture

@@ -98,7 +98,7 @@ pip install crossvector[all]
 ## Quick Start
 
 ```python
-from crossvector import VectorEngine, Document, UpsertRequest, SearchRequest
+from crossvector import VectorEngine
 from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
 from crossvector.dbs.astradb import AstraDBAdapter
 
@@ -110,27 +110,39 @@ engine = VectorEngine(
     store_text=True  # Optional: Set to False to not store original text
 )
 
-# Upsert documents
-docs = [
-    Document(text="The quick brown fox", metadata={"category": "animals"}), # ID auto-generated
-    Document(id="doc2", text="Artificial intelligence", metadata={"category": "tech"}),
-]
-result = engine.upsert(UpsertRequest(documents=docs))
-print(f"Inserted {result['count']} documents")
+# Create documents from texts with automatic embedding
+docs = engine.create_from_texts(
+    texts=["The quick brown fox", "Artificial intelligence"],
+    metadatas=[{"category": "animals"}, {"category": "tech"}],
+    pks=[None, "doc2"]  # None = auto-generated, or specify custom pk
+)
+print(f"Inserted {len(docs)} documents")
 
-# Search
-results = engine.search(SearchRequest(query="AI and ML", limit=5))
+# Alternative: Upsert with VectorDocument (if you have embeddings already)
+from crossvector import VectorDocument
+vector_docs = [
+    VectorDocument(pk="doc3", text="Python programming", vector=[0.1]*1536, metadata={"category": "tech"})
+]
+result = engine.upsert(vector_docs)
+
+# Search with automatic query embedding
+results = engine.search("AI and machine learning", limit=5)
 for doc in results:
-    print(f"Score: {doc.get('score', 'N/A')}, Text: {doc.get('text')}")
+    print(f"ID: {doc.pk}, Text: {doc.text}")
+
+# Search with filters
+results = engine.search("python", limit=5, where={"category": "tech"})
 
 # Get document by ID
 doc = engine.get("doc2")
+print(f"Retrieved: {doc.text}")
 
 # Count documents
 count = engine.count()
 
 # Delete documents
-engine.delete_one("doc2")
+deleted_count = engine.delete("doc2")  # Single ID
+deleted_count = engine.delete(["doc1", "doc2", "doc3"])  # Multiple IDs
 ```
 
 ## Configuration
@@ -171,7 +183,12 @@ PGVECTOR_PASSWORD=...
 # Vector metric (cosine, dot_product, euclidean)
 VECTOR_METRIC=cosine
 # Store original text in database (true/false)
-VECTOR_STORE_TEXT=true
+VECTOR_STORE_TEXT=false
+
+# Primary key generation mode (uuid, hash_text, hash_vector, int64, auto)
+PRIMARY_KEY_MODE=uuid
+# Optional: custom PK factory (dotted path to callable)
+# PRIMARY_KEY_FACTORY=mymodule.custom_pk_generator
 ```
 
 ## Database-Specific Examples

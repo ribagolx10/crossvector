@@ -389,7 +389,7 @@ class VectorEngine:
         vector_docs = []
         for i, text in enumerate(text_list):
             doc = VectorDocument(
-                pk=pk_list[i] if i < len(pk_list) else None,
+                id=pk_list[i] if i < len(pk_list) else None,
                 text=text,
                 vector=embeddings[i],
                 metadata=metadata_list[i] if i < len(metadata_list) else {},
@@ -446,7 +446,7 @@ class VectorEngine:
         vector_docs = []
         for i, text in enumerate(text_list):
             doc = VectorDocument(
-                pk=pk_list[i] if i < len(pk_list) else None,
+                id=pk_list[i] if i < len(pk_list) else None,
                 text=text,
                 vector=embeddings[i],
                 metadata=metadata_list[i] if i < len(metadata_list) else {},
@@ -504,7 +504,7 @@ class VectorEngine:
         vector_docs = []
         for i, text in enumerate(text_list):
             doc = VectorDocument(
-                pk=pk_list[i],
+                id=pk_list[i],
                 text=text,
                 vector=embeddings[i],
                 metadata=metadata_list[i] if i < len(metadata_list) else {},

@@ -144,9 +144,16 @@ def normalize_pks(
     if pks is None:
         return [None] * count
     elif isinstance(pks, (str, int)):
-        return [pks]
+        if count == 1:
+            return [pks]
+        else:
+            raise ValueError(f"Single pk provided but count is {count}")
     else:
-        return list(pks)
+        pk_list = list(pks)
+        # Pad with None if necessary
+        if len(pk_list) < count:
+            pk_list.extend([None] * (count - len(pk_list)))
+        return pk_list[:count]  # Truncate if too long
 
 
 def validate_primary_key_mode(
