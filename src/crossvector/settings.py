@@ -1,6 +1,6 @@
 """Settings for CrossVector engine."""
 
-from typing import Optional
+from typing import Optional, Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -44,6 +44,12 @@ class CrossVectorSettings(BaseSettings):
     # Vector settings
     VECTOR_METRIC: str = "cosine"
     VECTOR_STORE_TEXT: bool = False
+    PRIMARY_KEY_MODE: Literal["uuid", "hash_text", "hash_vector", "int64", "auto"] = (
+        "uuid"  # choices: uuid, hash_text, hash_vector, int64, auto
+    )
+
+    # Optional dotted path to custom PK factory callable: fn(text: str|None, vector: List[float]|None, metadata: dict) -> str
+    PRIMARY_KEY_FACTORY: Optional[str] = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

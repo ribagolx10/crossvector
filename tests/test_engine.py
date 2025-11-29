@@ -65,19 +65,36 @@ class MockDBAdapter(VectorDBAdapter):
     def count(self) -> int:
         return len(self.documents)
 
-    def delete_one(self, id: str) -> int:
-        if id in self.documents:
-            del self.documents[id]
-            return 1
-        return 0
+    def delete(self, ids) -> int:
+        id_list = [ids] if isinstance(ids, str) else list(ids or [])
+        deleted = 0
+        for _id in id_list:
+            if _id in self.documents:
+                del self.documents[_id]
+                deleted += 1
+        return deleted
 
-    def delete_many(self, ids) -> int:
-        count = 0
-        for id in ids:
-            if id in self.documents:
-                del self.documents[id]
-                count += 1
+    def drop_collection(self, collection_name: str) -> bool:
+        """Drop the collection (clear all documents)."""
+        self.documents.clear()
+        self.collection_initialized = False
+        return True
+
+    def clear_collection(self) -> int:
+        """Clear all documents from the collection."""
+        count = len(self.documents)
+        self.documents.clear()
         return count
+
+    def update(self, id: str, document) -> int:
+        """Update a single document by ID. Raises ValueError if not found."""
+        if id not in self.documents:
+            raise ValueError(f"Document with ID '{id}' not found")
+        # Merge updates into existing document
+        self.documents[id].update(document)
+        return 1
+
+    # remove duplicate delete definition (handled above)
 
 
 class TestVectorEngine:
@@ -109,8 +126,8 @@ class TestVectorEngine:
         # Upsert documents
         result = engine.upsert(UpsertRequest(documents=sample_documents[:3]))
 
-        assert result["status"] == "success"
-        assert result["count"] == 3
+        assert result.status == "success"
+        assert result.count == 3
         assert db_adapter.count() == 3
 
     def test_upsert_empty_documents(self):
@@ -124,8 +141,8 @@ class TestVectorEngine:
 
         result = engine.upsert(UpsertRequest(documents=[]))
 
-        assert result["status"] == "noop"
-        assert result["count"] == 0
+        assert result.status == "noop"
+        assert result.count == 0
 
     def test_search_documents(self, sample_documents):
         """Test searching documents."""
@@ -181,7 +198,7 @@ class TestVectorEngine:
         assert engine.count() == 3
 
     def test_delete_one_document(self, sample_documents):
-        """Test deleting a single document."""
+        """Test deleting a single document using unified delete() method."""
         embedding_adapter = MockEmbeddingAdapter()
         db_adapter = MockDBAdapter()
 
@@ -193,14 +210,15 @@ class TestVectorEngine:
         engine.upsert(UpsertRequest(documents=sample_documents[:3]))
         assert engine.count() == 3
 
-        # Delete one
-        deleted_count = engine.delete_one(sample_documents[0].id)
+        # Delete single document
+        result = engine.delete(sample_documents[0].id)
 
-        assert deleted_count == 1
+        assert result.status == "success"
+        assert result.count == 1
         assert engine.count() == 2
 
     def test_delete_many_documents(self, sample_documents):
-        """Test deleting multiple documents."""
+        """Test deleting multiple documents using unified delete() method."""
         embedding_adapter = MockEmbeddingAdapter()
         db_adapter = MockDBAdapter()
 
@@ -214,13 +232,14 @@ class TestVectorEngine:
 
         # Delete multiple
         ids_to_delete = [sample_documents[0].id, sample_documents[1].id]
-        deleted_count = engine.delete_many(ids_to_delete)
+        result = engine.delete(ids_to_delete)
 
-        assert deleted_count == 2
+        assert result.status == "success"
+        assert result.count == 2
         assert engine.count() == 3
 
     def test_delete_many_empty_list(self):
-        """Test deleting with empty ID list."""
+        """Test deleting with empty ID list using unified delete() method."""
         embedding_adapter = MockEmbeddingAdapter()
         db_adapter = MockDBAdapter()
 
@@ -228,9 +247,10 @@ class TestVectorEngine:
             embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name="test_collection"
         )
 
-        deleted_count = engine.delete_many([])
+        result = engine.delete([])
 
-        assert deleted_count == 0
+        assert result.status == "noop"
+        assert result.count == 0
 
     def test_document_format(self, sample_documents):
         """Test that documents are formatted correctly for DB adapter."""

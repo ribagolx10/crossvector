@@ -2,7 +2,7 @@
 
 import logging
 import os
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from crossvector.abc import EmbeddingAdapter
 
@@ -104,7 +104,7 @@ class GeminiEmbeddingAdapter(EmbeddingAdapter):
         )
 
     @property
-    def client(self):
+    def client(self) -> Any:
         """
         Lazily initializes and returns the Gemini client.
         """
@@ -147,7 +147,7 @@ class GeminiEmbeddingAdapter(EmbeddingAdapter):
             # Process texts individually
             for text in texts:
                 # Build config
-                config_params = {"task_type": self.task_type}
+                config_params: Dict[str, Any] = {"task_type": self.task_type}
 
                 # Add output_dimensionality if specified (only for gemini-embedding-001)
                 if self.output_dimensionality is not None and "gemini-embedding-001" in self.model_name:

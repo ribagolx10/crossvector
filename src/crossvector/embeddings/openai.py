@@ -48,6 +48,7 @@ class OpenAIEmbeddingAdapter(EmbeddingAdapter):
 
     @property
     def embedding_dimension(self) -> int:
+        assert self._embedding_dimension is not None
         return self._embedding_dimension
 
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:
