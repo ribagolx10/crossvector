@@ -27,7 +27,7 @@ from crossvector.settings import settings as api_settings
 from crossvector.utils import (
     apply_update_fields,
     extract_id,
-    normalize_ids,
+    normalize_pks,
     prepare_item_for_storage,
 )
 
@@ -47,7 +47,7 @@ class PGVectorAdapter(VectorDBAdapter):
         store_text: Whether to store original text with vectors
     """
 
-    use_dollar_vector: bool = True
+    use_dollar_vector: bool = False
 
     def __init__(self, **kwargs: Any):
         """Initialize the PGVector adapter with lazy connection setup.
@@ -442,12 +442,12 @@ class PGVectorAdapter(VectorDBAdapter):
         if self.cursor.fetchone():
             raise ValueError(f"Conflict: document with id '{pk}' already exists.")
 
-        vector = item.get("$vector")
+        vector = item.get("$vector") or item.get("vector")
         if vector is None:
             raise ValueError("Vector required for create in PGVector.")
 
         text = item.get("text") if self.store_text else None
-        metadata = {k: v for k, v in item.items() if k not in ("_id", "$vector", "text")}
+        metadata = {k: v for k, v in item.items() if k not in ("_id", "$vector", "vector", "text")}
 
         self.cursor.execute(
             f"INSERT INTO {self.collection_name} (id, vector, text, metadata) VALUES (%s, %s, %s, %s)",
@@ -519,9 +519,9 @@ class PGVectorAdapter(VectorDBAdapter):
         updates: List[str] = []
         params: List[Any] = []
 
-        if "$vector" in prepared:
+        if "$vector" in prepared or "vector" in prepared:
             updates.append("vector = %s")
-            params.append(prepared["$vector"])
+            params.append(prepared.get("$vector") or prepared.get("vector"))
 
         if self.store_text and "text" in prepared:
             updates.append("text = %s")
@@ -529,7 +529,7 @@ class PGVectorAdapter(VectorDBAdapter):
 
         metadata = existing.get("metadata", {})
         for k, v in prepared.items():
-            if k not in ("_id", "$vector", "text"):
+            if k not in ("_id", "$vector", "vector", "text"):
                 metadata[k] = v
 
         if metadata:
@@ -602,7 +602,7 @@ class PGVectorAdapter(VectorDBAdapter):
         if not self.collection_name:
             raise ValueError("Collection name must be set. Call initialize().")
 
-        pks = normalize_ids(ids)
+        pks = normalize_pks(ids)
         if not pks:
             return 0
 
@@ -672,12 +672,12 @@ class PGVectorAdapter(VectorDBAdapter):
                     continue
                 raise ValueError(f"Conflict on id '{pk}' during bulk_create.")
 
-            vector = item.get("$vector")
+            vector = item.get("$vector") or item.get("vector")
             if vector is None:
                 raise ValueError("Vector required for bulk_create in PGVector.")
 
             text = item.get("text") if self.store_text else None
-            metadata = {k: v for k, v in item.items() if k not in ("_id", "$vector", "text")}
+            metadata = {k: v for k, v in item.items() if k not in ("_id", "$vector", "vector", "text")}
 
             batch.append((pk, vector, text, json.dumps(metadata)))
             created_docs.append(doc)
@@ -785,9 +785,9 @@ class PGVectorAdapter(VectorDBAdapter):
         for doc in documents:
             item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
             doc_id = doc.pk
-            vector = item.get("$vector")
+            vector = item.get("$vector") or item.get("vector")
             text = item.get("text") if self.store_text else None
-            metadata = {k: v for k, v in item.items() if k not in ("_id", "$vector", "text")}
+            metadata = {k: v for k, v in item.items() if k not in ("_id", "$vector", "vector", "text")}
             metadata_json = json.dumps(metadata)
 
             sql = f"""

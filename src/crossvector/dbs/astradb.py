@@ -30,7 +30,7 @@ from crossvector.utils import (
     apply_update_fields,
     chunk_iter,
     extract_id,
-    normalize_ids,
+    normalize_pks,
     prepare_item_for_storage,
 )
 
@@ -521,7 +521,7 @@ class AstraDBAdapter(VectorDBAdapter):
         if not self.collection:
             raise ConnectionError("AstraDB collection is not initialized.")
 
-        pks = normalize_ids(ids)
+        pks = normalize_pks(ids)
         if not pks:
             return 0
 

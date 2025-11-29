@@ -98,7 +98,7 @@ pip install crossvector[all]
 ## Quick Start
 
 ```python
-from crossvector import VectorEngine
+from crossvector import VectorEngine, VectorDocument
 from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
 from crossvector.dbs.astradb import AstraDBAdapter
 
@@ -110,28 +110,32 @@ engine = VectorEngine(
     store_text=True  # Optional: Set to False to not store original text
 )
 
-# Create documents from texts with automatic embedding
-docs = engine.create_from_texts(
+# Create documents from texts with automatic embedding (recommended)
+docs = engine.upsert_from_texts(
     texts=["The quick brown fox", "Artificial intelligence"],
     metadatas=[{"category": "animals"}, {"category": "tech"}],
-    pks=[None, "doc2"]  # None = auto-generated, or specify custom pk
+    pks=["doc1", "doc2"]  # Optional: auto-generated if not provided
 )
 print(f"Inserted {len(docs)} documents")
 
 # Alternative: Upsert with VectorDocument (if you have embeddings already)
-from crossvector import VectorDocument
 vector_docs = [
-    VectorDocument(pk="doc3", text="Python programming", vector=[0.1]*1536, metadata={"category": "tech"})
+    VectorDocument(
+        id="doc3", 
+        text="Python programming", 
+        vector=[0.1]*1536, 
+        metadata={"category": "tech"}
+    )
 ]
 result = engine.upsert(vector_docs)
 
 # Search with automatic query embedding
-results = engine.search("AI and machine learning", limit=5)
+results = engine.search(query="AI and machine learning", limit=5)
 for doc in results:
-    print(f"ID: {doc.pk}, Text: {doc.text}")
+    print(f"ID: {doc.id}, Text: {doc.text}")
 
 # Search with filters
-results = engine.search("python", limit=5, where={"category": "tech"})
+results = engine.search(query="python", limit=5, where={"category": "tech"})
 
 # Get document by ID
 doc = engine.get("doc2")
@@ -260,39 +264,157 @@ adapter.initialize(
 
 ```python
 from crossvector.abc import VectorDBAdapter
-from typing import Any, Dict, List, Set
+from crossvector.schema import VectorDocument
+from typing import Any, Dict, List, Set, Optional, Union, Sequence, Tuple
 
 class MyCustomDBAdapter(VectorDBAdapter):
-    def initialize(self, collection_name: str, embedding_dimension: int, metric: str = "cosine", store_text: bool = True):
+    """Custom vector database adapter implementation."""
+    
+    # Optional: Set to True if your database uses '$vector' instead of 'vector'
+    use_dollar_vector: bool = False
+    
+    def initialize(
+        self, 
+        collection_name: str, 
+        embedding_dimension: int, 
+        metric: str = "cosine",
+        **kwargs: Any
+    ) -> None:
+        """Initialize database and ensure collection is ready."""
         # Your implementation
         pass
 
-    def get_collection(self, collection_name: str, embedding_dimension: int, metric: str = "cosine"):
+    def add_collection(
+        self, 
+        collection_name: str, 
+        embedding_dimension: int, 
+        metric: str = "cosine"
+    ) -> Any:
+        """Create a new collection."""
         # Your implementation
         pass
 
-    def upsert(self, documents: List[Dict[str, Any]]):
+    def get_collection(self, collection_name: str) -> Any:
+        """Retrieve an existing collection."""
         # Your implementation
         pass
 
-    def search(self, vector: List[float], limit: int, fields: Set[str]) -> List[Dict[str, Any]]:
+    def get_or_create_collection(
+        self, 
+        collection_name: str, 
+        embedding_dimension: int, 
+        metric: str = "cosine"
+    ) -> Any:
+        """Get existing collection or create if doesn't exist."""
         # Your implementation
         pass
 
-    def get(self, id: str) -> Dict[str, Any] | None:
+    def drop_collection(self, collection_name: str) -> bool:
+        """Delete a collection and all its documents."""
+        # Your implementation
+        pass
+
+    def clear_collection(self) -> int:
+        """Delete all documents from current collection."""
         # Your implementation
         pass
 
     def count(self) -> int:
+        """Count total documents in current collection."""
         # Your implementation
         pass
 
-    def delete_one(self, id: str) -> int:
+    def search(
+        self,
+        vector: List[float],
+        limit: int,
+        offset: int = 0,
+        where: Dict[str, Any] | None = None,
+        fields: Set[str] | None = None,
+    ) -> List[VectorDocument]:
+        """Perform vector similarity search."""
         # Your implementation
+        # Should return List[VectorDocument]
         pass
 
-    def delete_many(self, ids: List[str]) -> int:
+    def get(self, *args, **kwargs) -> VectorDocument:
+        """Retrieve a single document by primary key."""
         # Your implementation
+        # Should return VectorDocument instance
+        pass
+
+    def get_or_create(
+        self, 
+        defaults: Optional[Dict[str, Any]] = None, 
+        **kwargs
+    ) -> Tuple[VectorDocument, bool]:
+        """Get document by pk or create if not found."""
+        # Your implementation
+        # Should return (VectorDocument, created: bool)
+        pass
+
+    def create(self, **kwargs: Any) -> VectorDocument:
+        """Create and persist a single document."""
+        # Your implementation
+        # Should return VectorDocument instance
+        pass
+
+    def bulk_create(
+        self,
+        documents: List[VectorDocument],
+        batch_size: int = None,
+        ignore_conflicts: bool = False,
+        update_conflicts: bool = False,
+        update_fields: List[str] = None,
+    ) -> List[VectorDocument]:
+        """Create multiple documents in batch."""
+        # Your implementation
+        # Should return List[VectorDocument]
+        pass
+
+    def delete(self, ids: Union[str, Sequence[str]]) -> int:
+        """Delete document(s) by primary key."""
+        # Your implementation
+        # Should return count of deleted documents
+        pass
+
+    def update(self, **kwargs) -> VectorDocument:
+        """Update existing document by pk."""
+        # Your implementation
+        # Should return updated VectorDocument instance
+        pass
+
+    def update_or_create(
+        self,
+        defaults: Optional[Dict[str, Any]] = None,
+        create_defaults: Optional[Dict[str, Any]] = None,
+        **kwargs
+    ) -> Tuple[VectorDocument, bool]:
+        """Update document if exists, otherwise create."""
+        # Your implementation
+        # Should return (VectorDocument, created: bool)
+        pass
+
+    def bulk_update(
+        self,
+        documents: List[VectorDocument],
+        batch_size: int = None,
+        ignore_conflicts: bool = False,
+        update_fields: List[str] = None,
+    ) -> List[VectorDocument]:
+        """Update multiple existing documents by pk in batch."""
+        # Your implementation
+        # Should return List[VectorDocument]
+        pass
+
+    def upsert(
+        self, 
+        documents: List[VectorDocument], 
+        batch_size: int = None
+    ) -> List[VectorDocument]:
+        """Insert new documents or update existing ones."""
+        # Your implementation
+        # Should return List[VectorDocument]
         pass
 ```
 
@@ -322,13 +444,13 @@ CrossVector uses a standardized JSON format across all vector databases. Here's 
 
 ### 1. User Level (Creating Documents)
 
-When you create documents, use the `Document` class:
+When you create documents, use the `VectorDocument` class:
 
 ```python
-from crossvector import Document
+from crossvector import VectorDocument
 
-# Option 1: With explicit ID
-doc = Document(
+# Option 1: With explicit ID (string)
+doc = VectorDocument(
     id="my-custom-id",
     text="The content of my document",
     metadata={
@@ -338,12 +460,18 @@ doc = Document(
     }
 )
 
-# Option 2: Auto-generated ID (SHA256 hash of text)
-doc = Document(
+# Option 2: Auto-generated ID (based on PRIMARY_KEY_MODE setting)
+# Default mode: 'uuid' - Random UUID
+doc = VectorDocument(
     text="Another document without ID",
     metadata={"category": "auto"}
 )
-# doc.id will be a 64-character SHA256 hash
+# doc.id will be auto-generated based on your PRIMARY_KEY_MODE:
+# - 'uuid': Random UUID (32-char hex string)
+# - 'hash_text': SHA256 hash of text (64-char hex string)
+# - 'hash_vector': SHA256 hash of vector (64-char hex string)
+# - 'int64': Sequential integer (as string: "1", "2", "3", ...)
+# - 'auto': Hash text if available, else hash vector, else UUID
 
 # Timestamps are automatically generated
 print(doc.created_timestamp)  # Unix timestamp: 1732349789.123456
@@ -355,7 +483,7 @@ created_dt = datetime.fromtimestamp(doc.created_timestamp, tz=timezone.utc)
 print(created_dt)  # 2024-11-23 11:16:29.123456+00:00
 
 # You can safely use your own created_at/updated_at in metadata!
-doc_with_article_timestamps = Document(
+doc_with_article_timestamps = VectorDocument(
     text="My article content",
     metadata={
         "title": "My Article",
@@ -371,7 +499,13 @@ doc_with_article_timestamps = Document(
 
 **Auto-Generated Fields:**
 
-- `id`: SHA256 hash of text if not provided
+- `id`: Auto-generated if not provided, based on `PRIMARY_KEY_MODE` setting:
+  - `uuid` (default): Random UUID hex string
+  - `hash_text`: SHA256 hash of text content
+  - `hash_vector`: SHA256 hash of vector
+  - `int64`: Sequential integer (returned as string)
+  - `auto`: Smart mode - hash text if available, else hash vector, else UUID
+  - Custom: Can specify `PRIMARY_KEY_FACTORY` for custom ID generation function
 - `created_timestamp`: Unix timestamp (float) when document was created
 - `updated_timestamp`: Unix timestamp (float), updated on every modification
 
@@ -509,29 +643,27 @@ AstraDB stores everything at the document root level:
 
 ### 4. Search Results Format
 
-When you call `search()` or `get()`, results are returned in a unified format:
+When you call `search()` or `get()`, results are returned as `VectorDocument` instances:
 
 ```python
 # Search results
-results = engine.search(SearchRequest(query="example", limit=5))
+results = engine.search(query="example", limit=5)
 
-# Each result:
-{
-    "id": "unique-doc-id",           # Document ID
-    "score": 0.92,                   # Similarity score (lower = more similar for some metrics)
-    "text": "original text",         # If requested in fields
-    "metadata": {                    # Original metadata structure
-        "category": "example",
-        "source": "manual",
-        "tags": ["important"]
-    }
-}
+# Each result is a VectorDocument instance with:
+for doc in results:
+    doc.id              # Document ID (string)
+    doc.score           # Similarity score (added by search, lower = more similar for some metrics)
+    doc.text            # Original text (if store_text=True and requested in fields)
+    doc.vector          # Embedding vector (if requested in fields)
+    doc.metadata        # Metadata dictionary
+    doc.created_timestamp   # Creation timestamp (float)
+    doc.updated_timestamp   # Last update timestamp (float)
 ```
 
 ### 5. Example: Complete Flow
 
 ```python
-from crossvector import VectorEngine, Document, UpsertRequest, SearchRequest
+from crossvector import VectorEngine, VectorDocument
 from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
 from crossvector.dbs.pgvector import PGVectorAdapter
 
@@ -542,37 +674,42 @@ engine = VectorEngine(
     store_text=True
 )
 
-# 1. Create documents (User Level)
+# 1. Create documents from texts (User Level - Recommended)
+result = engine.upsert_from_texts(
+    texts=["Python is a programming language"],
+    metadatas=[{"lang": "en", "category": "tech"}]
+)
+
+# Alternative: Create VectorDocument directly (if you have embeddings)
 docs = [
-    Document(
+    VectorDocument(
         text="Python is a programming language",
+        vector=[0.1]*1536,  # Pre-computed embedding
         metadata={"lang": "en", "category": "tech"}
     )
 ]
+engine.upsert(docs)
 
-# 2. Upsert (Engine Level conversion happens automatically)
-engine.upsert(UpsertRequest(documents=docs))
-
-# 3. Search (Results in unified format)
-results = engine.search(SearchRequest(
+# 2. Search (Results in unified format)
+results = engine.search(
     query="programming languages",
     limit=5,
     fields={"text", "metadata"}  # Specify what to return
-))
+)
 
-# 4. Use results
-for result in results:
-    print(f"ID: {result['id']}")
-    print(f"Score: {result['score']}")
-    print(f"Text: {result.get('text', 'N/A')}")
-    print(f"Metadata: {result.get('metadata', {})}")
+# 3. Use results (VectorDocument instances)
+for doc in results:
+    print(f"ID: {doc.id}")
+    print(f"Score: {getattr(doc, 'score', 'N/A')}")
+    print(f"Text: {doc.text}")
+    print(f"Metadata: {doc.metadata}")
 ```
 
 ### Summary Table
 
 | Level | Format | Key Fields | Notes |
 |-------|--------|-----------|-------|
-| **User** | `Document` object | `id`, `text`, `metadata` | Pydantic validation, auto-generated ID |
+| **User** | `VectorDocument` object | `id`, `text`, `vector`, `metadata` | Pydantic validation, auto-generated ID |
 | **Engine** | Python dict | `_id`, `vector`, `text`, metadata fields | Standardized across all DBs |
 | **PGVector** | SQL row | `doc_id`, `vector`, `text`, `metadata` (JSONB) | Text in separate column |
 | **Milvus** | JSON document | `doc_id`, `vector`, `text`, `metadata` (JSON) | Text in VARCHAR field |

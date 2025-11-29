@@ -59,40 +59,62 @@ adapter.initialize(
 
 ## Creating a Custom Database Adapter
 
+See the main README or `crossvector.abc.VectorDBAdapter` for the complete interface.
+
 ```python
 from crossvector.abc import VectorDBAdapter
-from typing import Any, Dict, List, Set
+from crossvector.schema import VectorDocument
+from typing import Any, Dict, List, Set, Optional, Union, Sequence, Tuple
 
 class MyCustomDBAdapter(VectorDBAdapter):
-    def initialize(self, collection_name: str, embedding_dimension: int, metric: str = "cosine"):
-        # Your implementation
+    """Custom vector database adapter implementation."""
+    
+    use_dollar_vector: bool = False  # Set to True if your DB uses '$vector'
+    
+    def initialize(
+        self, 
+        collection_name: str, 
+        embedding_dimension: int, 
+        metric: str = "cosine",
+        **kwargs: Any
+    ) -> None:
+        """Initialize database and ensure collection is ready."""
         pass
 
-    def get_collection(self, collection_name: str, embedding_dimension: int, metric: str = "cosine"):
-        # Your implementation
+    def search(
+        self,
+        vector: List[float],
+        limit: int,
+        offset: int = 0,
+        where: Dict[str, Any] | None = None,
+        fields: Set[str] | None = None,
+    ) -> List[VectorDocument]:
+        """Perform vector similarity search."""
+        # Should return List[VectorDocument]
         pass
 
-    def upsert(self, documents: List[Dict[str, Any]]):
-        # Your implementation
+    def get(self, *args, **kwargs) -> VectorDocument:
+        """Retrieve a single document by primary key."""
+        # Should return VectorDocument instance
         pass
 
-    def search(self, vector: List[float], limit: int, fields: Set[str]) -> List[Dict[str, Any]]:
-        # Your implementation
+    def upsert(
+        self, 
+        documents: List[VectorDocument], 
+        batch_size: int = None
+    ) -> List[VectorDocument]:
+        """Insert new documents or update existing ones."""
+        # Should return List[VectorDocument]
         pass
 
-    def get(self, id: str) -> Dict[str, Any] | None:
-        # Your implementation
+    def delete(self, ids: Union[str, Sequence[str]]) -> int:
+        """Delete document(s) by primary key."""
+        # Should return count of deleted documents
         pass
 
     def count(self) -> int:
-        # Your implementation
+        """Count total documents in current collection."""
         pass
 
-    def delete_one(self, id: str) -> int:
-        # Your implementation
-        pass
-
-    def delete_many(self, ids: List[str]) -> int:
-        # Your implementation
-        pass
+    # ... and more methods (see VectorDBAdapter ABC)
 ```

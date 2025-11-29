@@ -12,7 +12,7 @@ Simplify your vector search infrastructure with a single, unified API across all
 - 🔌 **Pluggable Architecture**: Easy adapter pattern for both databases and embeddings
 - 🗄️ **Multiple Vector Databases**: AstraDB, ChromaDB, Milvus, PGVector
 - 🤖 **Multiple Embedding Providers**: OpenAI, Gemini
-- 🎯 **Smart Document Handling**: Auto-generated IDs (SHA256), optional text storage
+- 🎯 **Smart Document Handling**: Auto-generated IDs (UUID/hash/int64/custom), optional text storage
 - 📦 **Install Only What You Need**: Optional dependencies per adapter
 - 🔒 **Type-Safe**: Full Pydantic validation
 - 🔄 **Consistent API**: Same interface across all adapters

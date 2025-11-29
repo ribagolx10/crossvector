@@ -1,31 +1,38 @@
-# Document Schema
+# VectorDocument Schema
 
-CrossVector uses a Pydantic `Document` class for type-safe document handling with powerful auto-generation features.
+CrossVector uses a Pydantic `VectorDocument` class for type-safe VectorDocument handling with powerful auto-generation features.
 
 ## Features
 
 ### 1. Auto-Generated ID
 
-If you don't provide an ID, CrossVector automatically generates one using SHA256 hash of the text:
+If you don't provide an ID, CrossVector automatically generates one based on your `PRIMARY_KEY_MODE` setting:
 
 ```python
-from crossvector import Document
+from crossvector import VectorDocument
 
-# Without ID - auto-generated
-doc = Document(text="Hello world")
-print(doc.id)  # SHA256 hash: a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e
+# Without ID - auto-generated based on PRIMARY_KEY_MODE
+doc = VectorDocument(text="Hello world")
+print(doc.id)  
+# Possible values depending on PRIMARY_KEY_MODE:
+# - 'uuid' (default): Random UUID like "a1b2c3d4e5f6..."
+# - 'hash_text': SHA256 hash of text like "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e"
+# - 'hash_vector': SHA256 hash of vector
+# - 'int64': Sequential integer as string like "1", "2", "3", ...
+# - 'auto': Hash text if available, else hash vector, else UUID
+# - Custom factory: Use PRIMARY_KEY_FACTORY setting for custom logic
 
-#With explicit ID
-doc = Document(id="my-custom-id", text="Hello world")
+# With explicit ID
+doc = VectorDocument(id="my-custom-id", text="Hello world")
 print(doc.id)  # "my-custom-id"
 ```
 
 ### 2. Auto-Generated Timestamps
 
-Every document automatically gets creation and update timestamps:
+Every VectorDocument automatically gets creation and update timestamps:
 
 ```python
-doc = Document(text="Hello world")
+doc = VectorDocument(text="Hello world")
 
 print(doc.created_timestamp)  # 1732349789.123456 (Unix timestamp)
 print(doc.updated_timestamp)  # 1732349789.123456 (Unix timestamp)
@@ -48,7 +55,7 @@ print(created_dt)  # 2024-11-23 11:16:29.123456+00:00
 You can safely use your own `created_at` and `updated_at` fields:
 
 ```python
-doc = Document(
+doc = VectorDocument(
     text="My article",
     metadata={
         "title": "Introduction to AI",
@@ -67,28 +74,28 @@ print(doc.metadata["created_at"])  # "2024-01-15T10:00:00Z"
 print(doc.metadata["updated_at"])  # "2024-11-20T15:30:00Z"
 ```
 
-## Document Fields
+## VectorDocument Fields
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `id` | `str` | No (auto-generated) | Unique identifier. SHA256 hash of text if not provided |
-| `text` | `str` | Yes | The text content of the document |
+| `id` | `str` | No (auto-generated) | Unique identifier. Auto-generated based on PRIMARY_KEY_MODE if not provided (uuid/hash_text/hash_vector/int64/auto/custom) |
+| `text` | `str` | Yes | The text content of the VectorDocument |
 | `metadata` | `Dict[str, Any]` | No (default: `{}`) | Associated metadata |
 | `created_timestamp` | `float` | No (auto-generated) | Unix timestamp when created |
 | `updated_timestamp` | `float` | No (auto-generated) | Unix timestamp when last updated |
 
 ## Examples
 
-### Basic Document
+### Basic VectorDocument
 
 ```python
-doc = Document(text="Hello world")
+doc = VectorDocument(text="Hello world")
 ```
 
-### Document with Metadata
+### VectorDocument with Metadata
 
 ```python
-doc = Document(
+doc = VectorDocument(
     text="Python is awesome",
     metadata={
         "language": "en",
@@ -98,10 +105,10 @@ doc = Document(
 )
 ```
 
-### Document with Custom ID
+### VectorDocument with Custom ID
 
 ```python
-doc = Document(
+doc = VectorDocument(
     id="article-123",
     text="Full article content here...",
     metadata={
@@ -113,15 +120,15 @@ doc = Document(
 
 ### Preserving Created Timestamp
 
-When updating a document, you can preserve the original creation timestamp:
+When updating a VectorDocument, you can preserve the original creation timestamp:
 
 ```python
-# Original document
-doc1 = Document(id="article-1", text="Original content")
+# Original VectorDocument
+doc1 = VectorDocument(id="article-1", text="Original content")
 original_created = doc1.created_timestamp
 
-# Later, update the document
-doc2 = Document(
+# Later, update the VectorDocument
+doc2 = VectorDocument(
     id="article-1",
     text="Updated content",
     created_timestamp=original_created  # Preserve original
@@ -134,7 +141,7 @@ print(doc2.updated_timestamp)  # New timestamp
 ## Serialization
 
 ```python
-doc = Document(text="Hello", metadata={"key": "value"})
+doc = VectorDocument(text="Hello", metadata={"key": "value"})
 
 # To dict
 doc_dict = doc.model_dump()

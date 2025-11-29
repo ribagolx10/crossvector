@@ -20,6 +20,4 @@
 
 ## Schema
 
-::: crossvector.schema.Document
-::: crossvector.schema.UpsertRequest
-::: crossvector.schema.SearchRequest
+::: crossvector.schema.VectorDocument

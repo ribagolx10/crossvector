@@ -7,7 +7,7 @@ import time
 
 from dotenv import load_dotenv
 
-from crossvector import Document, SearchRequest, UpsertRequest, VectorEngine
+from crossvector import VectorDocument, VectorEngine
 from crossvector.dbs.astradb import AstraDBAdapter
 from crossvector.dbs.chroma import ChromaDBAdapter
 from crossvector.dbs.milvus import MilvusDBAdapter
@@ -19,23 +19,17 @@ from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
 load_dotenv()
 
 # Test data
-test_docs = [
-    Document(
-        id="doc1",
-        text="The quick brown fox jumps over the lazy dog.",
-        metadata={"category": "animals", "source": "test"},
-    ),
-    Document(
-        id="doc2",
-        text="Artificial intelligence is transforming the world.",
-        metadata={"category": "technology", "source": "test"},
-    ),
-    Document(
-        id="doc3",
-        text="Machine learning enables computers to learn from data.",
-        metadata={"category": "technology", "source": "test"},
-    ),
+test_texts = [
+    "The quick brown fox jumps over the lazy dog.",
+    "Artificial intelligence is transforming the world.",
+    "Machine learning enables computers to learn from data.",
 ]
+test_metadatas = [
+    {"category": "animals", "source": "test"},
+    {"category": "technology", "source": "test"},
+    {"category": "technology", "source": "test"},
+]
+test_pks = ["doc1", "doc2", "doc3"]
 
 
 def test_engine(db_name: str, db_adapter, embedding_adapter, collection_name: str):
@@ -57,30 +51,30 @@ def test_engine(db_name: str, db_adapter, embedding_adapter, collection_name: st
     # Re-initialize after dropping
     engine = VectorEngine(embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name=collection_name)
 
-    # Test 1: Upsert documents
-    print("\n1. Testing upsert...")
-    result = engine.upsert(UpsertRequest(documents=test_docs))
-    print(f"Inserted {result['count']} documents")
+    # Test 1: Upsert VectorDocuments from texts (with auto-embedding)
+    print("\n1. Testing upsert_from_texts...")
+    result = engine.upsert_from_texts(texts=test_texts, metadatas=test_metadatas, pks=test_pks)
+    print(f"Inserted {len(result)} VectorDocuments")
 
-    # Test 2: Count documents
+    # Test 2: Count VectorDocuments
     print("\n2. Testing count...")
     count = engine.count()
     print(f"Total documents: {count}")
-    assert count == len(test_docs), f"Expected {len(test_docs)} documents, got {count}"
+    assert count == len(test_texts), f"Expected {len(test_texts)} VectorDocuments, got {count}"
 
     # Test 3: Get document by ID
     print("\n3. Testing get...")
     doc = engine.get("doc1")
-    print(f"Retrieved document: {doc.get('text', 'N/A')[:50]}...")
-    assert doc is not None, "Document not found"
+    print(f"Retrieved doc: {doc.text[:50] if doc.text else 'N/A'}...")
+    assert doc is not None, "VectorDocument not found"
 
     # Test 4: Search
     print("\n4. Testing search...")
-    results = engine.search(SearchRequest(query="AI and machine learning", limit=2))
+    results = engine.search(query="AI and machine learning", limit=2)
     print(f"Found {len(results)} results")
     for i, result in enumerate(results, 1):
-        score = result.get("score", "N/A")
-        text = result.get("text", "N/A")
+        score = getattr(result, "score", "N/A")
+        text = result.text if result.text else "N/A"
         if text != "N/A":
             text = text[:50]
         if isinstance(score, (int, float)):
@@ -89,26 +83,26 @@ def test_engine(db_name: str, db_adapter, embedding_adapter, collection_name: st
             print(f"  {i}. Score: {score}, Text: {text}...")
 
     # Test 5: Delete one
-    print("\n5. Testing delete_one...")
-    deleted = engine.delete_one("doc1")
+    print("\n5. Testing delete...")
+    deleted = engine.delete("doc1")
     print(f"Deleted {deleted} document(s)")
 
     # Verify deletion
     count_after_delete = engine.count()
-    print(f"Documents after deletion: {count_after_delete}")
-    assert count_after_delete == len(test_docs) - 1, (
-        f"Expected {len(test_docs) - 1} documents, got {count_after_delete}"
+    print(f"VectorDocuments after deletion: {count_after_delete}")
+    assert count_after_delete == len(test_texts) - 1, (
+        f"Expected {len(test_texts) - 1} VectorDocuments, got {count_after_delete}"
     )
 
     # Test 6: Delete many
-    print("\n6. Testing delete_many...")
-    deleted = engine.delete_many(["doc2", "doc3"])
+    print("\n6. Testing delete...")
+    deleted = engine.delete(["doc2", "doc3"])
     print(f"Deleted {deleted} document(s)")
 
     # Verify all deleted
     final_count = engine.count()
     print(f"Final document count: {final_count}")
-    assert final_count == 0, f"Expected 0 documents, got {final_count}"
+    assert final_count == 0, f"Expected 0 VectorDocuments, got {final_count}"
 
     print(f"\nAll tests passed for {db_name}!")
 

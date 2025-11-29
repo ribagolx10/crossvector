@@ -26,7 +26,7 @@ from crossvector.settings import settings as api_settings
 from crossvector.utils import (
     apply_update_fields,
     extract_id,
-    normalize_ids,
+    normalize_pks,
     prepare_item_for_storage,
 )
 
@@ -47,7 +47,7 @@ class ChromaDBAdapter(VectorDBAdapter):
         metric: Distance metric for vector search
     """
 
-    use_dollar_vector: bool = True
+    use_dollar_vector: bool = False
 
     def __init__(self, **kwargs: Any):
         """Initialize the ChromaDB adapter with lazy client setup.
@@ -446,7 +446,7 @@ class ChromaDBAdapter(VectorDBAdapter):
         stored = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
 
         pk = doc.pk
-        vector = stored.get("$vector")
+        vector = stored.get("$vector") or stored.get("vector")
         if vector is None:
             raise ValueError("Vector ('$vector' or 'vector') is required for create in ChromaDB.")
 
@@ -519,7 +519,7 @@ class ChromaDBAdapter(VectorDBAdapter):
             raise ValueError(f"Document with ID '{id_val}' not found")
 
         prepared = prepare_item_for_storage(kwargs, store_text=self.store_text)
-        vector = prepared.get("$vector") or existing["embeddings"][0]
+        vector = prepared.get("$vector") or prepared.get("vector") or existing["embeddings"][0]
         text = prepared.get("text") if self.store_text else (existing.get("documents", [None])[0])
 
         # Start from existing metadata, overlay new fields
@@ -592,7 +592,7 @@ class ChromaDBAdapter(VectorDBAdapter):
         if not self.collection:
             raise ConnectionError("ChromaDB collection is not initialized.")
 
-        pks = normalize_ids(ids)
+        pks = normalize_pks(ids)
         if not pks:
             return 0
 
@@ -642,7 +642,7 @@ class ChromaDBAdapter(VectorDBAdapter):
         for doc in documents:
             item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
             pk = doc.pk
-            vector = item.get("$vector")
+            vector = item.get("$vector") or item.get("vector")
             if vector is None:
                 raise ValueError("Vector required for bulk_create in ChromaDB.")
 
@@ -655,7 +655,7 @@ class ChromaDBAdapter(VectorDBAdapter):
                     # Perform update instead
                     update_doc = apply_update_fields(item, update_fields)
                     meta_update = {k: v for k, v in update_doc.items() if k not in ("_id", "$vector", "text")}
-                    vector_update = update_doc.get("$vector") or vector
+                    vector_update = update_doc.get("$vector") or update_doc.get("vector") or vector
                     text_update = update_doc.get("text") if self.store_text else None
                     self.collection.update(
                         ids=[pk],
@@ -751,7 +751,7 @@ class ChromaDBAdapter(VectorDBAdapter):
             update_doc = apply_update_fields(item, update_fields)
 
             meta_update = {k: v for k, v in update_doc.items() if k not in ("_id", "$vector", "text")}
-            vector_update = update_doc.get("$vector") or existing["embeddings"][0]
+            vector_update = update_doc.get("$vector") or update_doc.get("vector") or existing["embeddings"][0]
             text_update = update_doc.get("text") if self.store_text else None
 
             self.collection.update(
@@ -794,7 +794,7 @@ class ChromaDBAdapter(VectorDBAdapter):
         for doc in documents:
             item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
             ids.append(doc.pk)
-            vectors.append(item.get("$vector"))
+            vectors.append(item.get("$vector") or item.get("vector"))
             metadata = {k: v for k, v in item.items() if k not in ("_id", "$vector", "text")}
             metadatas.append(metadata)
             texts.append(item.get("text") if self.store_text else None)

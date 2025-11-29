@@ -385,7 +385,7 @@ class VectorEngine:
         log.info(f"Generating embeddings for {len(text_list)} text(s)")
         embeddings = self.embedding_adapter.get_embeddings(text_list)
 
-        # Create VectorDocuments
+        # Create documents
         vector_docs = []
         for i, text in enumerate(text_list):
             doc = VectorDocument(
@@ -442,7 +442,7 @@ class VectorEngine:
         log.info(f"Generating embeddings for {len(text_list)} text(s)")
         embeddings = self.embedding_adapter.get_embeddings(text_list)
 
-        # Create VectorDocuments
+        # Create documents
         vector_docs = []
         for i, text in enumerate(text_list):
             doc = VectorDocument(
@@ -500,7 +500,7 @@ class VectorEngine:
         log.info(f"Generating embeddings for {len(text_list)} text(s)")
         embeddings = self.embedding_adapter.get_embeddings(text_list)
 
-        # Create VectorDocuments
+        # Create documents
         vector_docs = []
         for i, text in enumerate(text_list):
             doc = VectorDocument(

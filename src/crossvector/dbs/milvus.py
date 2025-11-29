@@ -25,7 +25,7 @@ from crossvector.settings import settings as api_settings
 from crossvector.utils import (
     apply_update_fields,
     extract_id,
-    normalize_ids,
+    normalize_pks,
     prepare_item_for_storage,
 )
 
@@ -567,7 +567,7 @@ class MilvusDBAdapter(VectorDBAdapter):
         prepared = prepare_item_for_storage(kwargs, store_text=self.store_text)
 
         # Build replacement doc using existing + updates
-        vector = prepared.get("$vector") or existing_doc.get("vector")
+        vector = prepared.get("$vector") or prepared.get("vector") or existing_doc.get("vector")
         text_val = existing_doc.get("text", "")
         if self.store_text and "text" in prepared:
             text_val = prepared["text"]
@@ -637,7 +637,7 @@ class MilvusDBAdapter(VectorDBAdapter):
         if not self.collection_name:
             raise ValueError("Collection name must be set. Call initialize().")
 
-        pks = normalize_ids(ids)
+        pks = normalize_pks(ids)
         if not pks:
             return 0
 
@@ -693,7 +693,7 @@ class MilvusDBAdapter(VectorDBAdapter):
                     # Perform update instead
                     update_doc = apply_update_fields(item, update_fields)
                     # Build merged document
-                    vector = update_doc.get("$vector") or existing[0].get("vector")
+                    vector = update_doc.get("$vector") or update_doc.get("vector") or existing[0].get("vector")
                     text_val = update_doc.get("text", existing[0].get("text", ""))
                     if len(text_val) > 65535:
                         text_val = text_val[:65535]
@@ -784,7 +784,7 @@ class MilvusDBAdapter(VectorDBAdapter):
             update_doc = apply_update_fields(item, update_fields)
 
             # Build replacement doc using existing + updates
-            vector = update_doc.get("$vector") or existing[0].get("vector")
+            vector = update_doc.get("$vector") or update_doc.get("vector") or existing[0].get("vector")
             text_val = existing[0].get("text", "")
             if self.store_text and "text" in update_doc:
                 text_val = update_doc["text"]
