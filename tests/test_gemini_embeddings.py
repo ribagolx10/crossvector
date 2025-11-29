@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
+from crossvector.exceptions import InvalidFieldError
 
 
 class TestGeminiEmbeddingAdapter:
@@ -53,7 +54,7 @@ class TestGeminiEmbeddingAdapter:
     def test_dynamic_dimensionality_invalid(self):
         """Test invalid dynamic dimensionality raises error."""
         with patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}):
-            with pytest.raises(ValueError, match="Invalid output_dimensionality"):
+            with pytest.raises(InvalidFieldError, match="Invalid output_dimensionality"):
                 GeminiEmbeddingAdapter(
                     model_name="gemini-embedding-001",
                     output_dimensionality=1024,  # Invalid

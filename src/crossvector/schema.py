@@ -3,8 +3,10 @@
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field, model_validator, PrivateAttr
-from .utils import generate_pk
+from pydantic import BaseModel, Field, model_validator
+
+from .exceptions import InvalidFieldError, MissingFieldError
+from .utils import extract_pk, generate_pk
 
 
 class VectorDocument(BaseModel):
@@ -18,7 +20,7 @@ class VectorDocument(BaseModel):
     @property
     def pk(self) -> str:
         if self.id is None:
-            raise ValueError("Document ID not set")
+            raise MissingFieldError("Document ID not set", field="id")
         return self.id
 
     @model_validator(mode="after")
@@ -35,10 +37,13 @@ class VectorDocument(BaseModel):
 
     @classmethod
     def from_kwargs(cls, **kwargs: Any) -> "VectorDocument":
-        pk = kwargs.pop("_id", None) or kwargs.pop("id", None)
+        pk = extract_pk(None, **kwargs)
+        # Remove pk fields so they don't leak into metadata
+        for _k in ("_id", "id", "pk"):
+            kwargs.pop(_k, None)
         vector = kwargs.pop("$vector", None) or kwargs.pop("vector", None)
         if vector is None:
-            raise ValueError("'vector' or '$vector' is required for document.from_kwargs")
+            raise MissingFieldError("'vector' or '$vector' is required for document.from_kwargs", field="vector")
         text = kwargs.pop("text", None)
         metadata = kwargs.pop("metadata", None) or {}
         for k, v in kwargs.items():
@@ -46,8 +51,126 @@ class VectorDocument(BaseModel):
                 metadata[k] = v
         return cls(id=pk, vector=vector, text=text, metadata=metadata)
 
+    @classmethod
+    def from_text(cls, text: str, **kwargs: Any) -> "VectorDocument":
+        """Create VectorDocument from text with optional metadata.
+
+        Args:
+            text: Text content
+            **kwargs: Additional fields (id, metadata, or any metadata fields)
+
+        Returns:
+            VectorDocument with empty vector (to be filled by engine)
+
+        Examples:
+            doc = VectorDocument.from_text("Hello", source="api", user_id="123")
+            doc = VectorDocument.from_text("Hello", metadata={"source": "api"})
+        """
+        pk = extract_pk(None, **kwargs)
+        for k in ("_id", "id", "pk"):
+            kwargs.pop(k, None)
+        metadata = kwargs.pop("metadata", None) or {}
+        # Remaining kwargs are metadata fields
+        for k, v in kwargs.items():
+            if k not in metadata:
+                metadata[k] = v
+        return cls(id=pk, text=text, vector=[], metadata=metadata)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], **kwargs: Any) -> "VectorDocument":
+        """Create VectorDocument from dict, merging with kwargs.
+
+        Args:
+            data: Dictionary with document fields
+            **kwargs: Additional fields to merge/override
+
+        Returns:
+            VectorDocument instance
+
+        Examples:
+            doc = VectorDocument.from_dict({"text": "Hello", "source": "api"})
+            doc = VectorDocument.from_dict({"text": "Hello"}, user_id="123")
+        """
+        merged = data.copy()
+        merged.update(kwargs)
+        # Try from_kwargs if vector exists, otherwise construct minimal doc
+        if "$vector" in merged or "vector" in merged:
+            return cls.from_kwargs(**merged)
+        # No vector - create with minimal fields
+        pk = extract_pk(None, **merged)
+        for _k in ("_id", "id", "pk"):
+            merged.pop(_k, None)
+        text = merged.pop("text", None)
+        metadata = merged.pop("metadata", None) or {}
+        for k, v in merged.items():
+            if k not in metadata:
+                metadata[k] = v
+        return cls(id=pk, text=text, vector=[], metadata=metadata)
+
+    @classmethod
+    def from_any(
+        cls, doc: Union["VectorDocument", Dict[str, Any], str, None] = None, **kwargs: Any
+    ) -> "VectorDocument":
+        """Create VectorDocument from any input type.
+
+        Universal factory method that handles:
+        - VectorDocument: returns as-is
+        - str: treats as text, kwargs become metadata
+        - dict: merges with kwargs
+        - None: constructs from kwargs (requires 'text' key)
+
+        Args:
+            doc: Input data (VectorDocument, dict, text string, or None)
+            **kwargs: Additional fields to merge/override
+
+        Returns:
+            VectorDocument instance
+
+        Raises:
+            TypeError: If doc type is not supported
+            ValueError: If cannot construct document from inputs
+
+        Examples:
+            # From text string
+            doc = VectorDocument.from_any("Hello", source="api")
+
+            # From dict
+            doc = VectorDocument.from_any({"text": "Hello"}, user_id="123")
+
+            # From kwargs only
+            doc = VectorDocument.from_any(text="Hello", source="api")
+
+            # VectorDocument pass-through
+            doc = VectorDocument.from_any(existing_doc)
+        """
+        # Already a VectorDocument - return as-is
+        if isinstance(doc, cls):
+            return doc
+
+        # Text string - create from text with kwargs as metadata
+        if isinstance(doc, str):
+            return cls.from_text(doc, **kwargs)
+
+        # Dict - merge with kwargs
+        if isinstance(doc, dict):
+            return cls.from_dict(doc, **kwargs)
+
+        # None - construct from kwargs (detect pk/id/_id)
+        if doc is None and kwargs:
+            if "text" in kwargs:
+                text = kwargs.pop("text")
+                return cls.from_text(text, **kwargs)
+            else:
+                return cls.from_dict(kwargs)
+
+        # Invalid input
+        if doc is None:
+            raise InvalidFieldError("Need doc or kwargs to create VectorDocument", field="doc")
+
+        raise TypeError(f"Cannot create VectorDocument from type: {type(doc).__name__}")
+
     def dump(
-        self, *, store_text: bool = True, use_dollar_vector: bool = True, include_timestamps: bool = False
+        self, *, store_text: bool = True, use_dollar_vector: bool = False, include_timestamps: bool = False
     ) -> Dict[str, Any]:
         out: Dict[str, Any] = {"_id": self.id}
         if use_dollar_vector:
@@ -63,7 +186,7 @@ class VectorDocument(BaseModel):
             out["updated_timestamp"] = self.updated_timestamp
         return out
 
-    def to_storage_dict(self, *, store_text: bool = True, use_dollar_vector: bool = True) -> Dict[str, Any]:
+    def to_storage_dict(self, *, store_text: bool = True, use_dollar_vector: bool = False) -> Dict[str, Any]:
         """Prepare VectorDocument for storage in database.
 
         This is a convenience method that calls dump() with common parameters.
@@ -77,3 +200,60 @@ class VectorDocument(BaseModel):
             Dictionary ready for database storage
         """
         return self.dump(store_text=store_text, use_dollar_vector=use_dollar_vector, include_timestamps=False)
+
+    def copy_with(self, **kwargs: Any) -> "VectorDocument":
+        """Create a copy with specified fields overridden.
+
+        Only updates fields that are:
+        - Explicitly provided in kwargs AND
+        - Either current field is None OR new value is truthy
+
+        Supports both 'vector' and '$vector' keys.
+        Metadata is always merged (not replaced).
+
+        Args:
+            **kwargs: Fields to update (id, text, vector, $vector, metadata)
+
+        Returns:
+            New VectorDocument instance with updated fields
+
+        Examples:
+            doc = VectorDocument(id="1", text="Hello", vector=[0.1, 0.2])
+
+            # Update text only
+            new_doc = doc.copy_with(text="World")
+
+            # Merge metadata
+            new_doc = doc.copy_with(metadata={"source": "api"})
+
+            # Update only if current is None
+            new_doc = doc.copy_with(text="Default")  # only if doc.text is None
+        """
+        new_id = self.id
+        new_text = self.text
+        new_vector = self.vector
+        new_metadata = self.metadata.copy()
+
+        # Update id only if current is None
+        if "id" in kwargs and self.id is None and kwargs["id"]:
+            new_id = kwargs["id"]
+
+        # Update text only if current is None
+        if "text" in kwargs and self.text is None and kwargs["text"]:
+            new_text = kwargs["text"]
+
+        # Update vector only if current is empty (support both keys)
+        vector_val = kwargs.get("vector") or kwargs.get("$vector")
+        if vector_val and (not self.vector):
+            new_vector = vector_val
+
+        # Merge metadata (always merge, never replace)
+        if "metadata" in kwargs and isinstance(kwargs["metadata"], dict):
+            new_metadata.update(kwargs["metadata"])
+
+        return VectorDocument(
+            id=new_id,
+            text=new_text,
+            vector=new_vector or [],
+            metadata=new_metadata,
+        )

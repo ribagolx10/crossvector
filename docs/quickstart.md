@@ -7,25 +7,15 @@ from crossvector.dbs.astradb import AstraDBAdapter
 
 # Initialize engine
 engine = VectorEngine(
-    embedding_adapter=OpenAIEmbeddingAdapter(model_name="text-embedding-3-small"),
-    db_adapter=AstraDBAdapter(),
+    db=AstraDBAdapter(),
+    embedding=OpenAIEmbeddingAdapter(model_name="text-embedding-3-small"),
     collection_name="my_documents",
     store_text=True  # Optional: Set to False to save space
 )
 
-# Method 1: Create from texts (Recommended - Auto embedding)
-result = engine.upsert_from_texts(
-    texts=["The quick brown fox", "Artificial intelligence", "My article"],
-    metadatas=[
-        {"category": "animals"},
-        {"category": "tech"},
-        {
-            "title": "Introduction to AI",
-            "created_at": "2024-01-15T10:00:00Z",  # Your article timestamp
-            "author": "John Doe"
-        }
-    ],
-    pks=["doc1", "doc2", None]  # None = auto-generated
+# Method 1: Create from docs (Recommended - Auto embedding)
+result = engine.upsert(
+    docs=["The quick brown fox", "Artificial intelligence", "My article"]
 )
 print(f"Inserted {len(result)} documents")
 

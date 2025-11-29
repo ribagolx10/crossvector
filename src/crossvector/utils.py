@@ -3,12 +3,12 @@
 Shared helpers extracted from adapters to reduce duplication.
 """
 
-from typing import Iterator, List, Sequence, Dict, Any, Union, Literal, Optional, Callable
 import hashlib
 import importlib
 import uuid
-from .settings import settings
+from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Sequence, Union
 
+from .settings import settings
 
 # ===========================================================================
 # Core utilities
@@ -24,9 +24,33 @@ def chunk_iter(seq: Sequence[Any], size: int) -> Iterator[Sequence[Any]]:
         yield seq[i : i + size]
 
 
-def extract_id(data: Dict[str, Any]) -> str | None:
-    """Extract primary key from kwargs/dict supporting _id, id, or pk fields."""
-    return data.get("_id") or data.get("id") or data.get("pk")
+def extract_pk(doc: Any = None, **kwargs: Any) -> str | None:
+    """Extract primary key from doc object or kwargs/dict.
+
+    Supports _id, id, or pk fields from:
+    1. doc object attributes (if doc has 'id' attribute)
+    2. kwargs dict keys
+
+    Args:
+        doc: Optional object with id/pk attribute (e.g., VectorDocument)
+        **kwargs: Dictionary with _id/id/pk keys
+
+    Returns:
+        Extracted ID or None
+
+    Examples:
+        extract_pk(doc)  # from VectorDocument.id
+        extract_pk(id="123")  # from kwargs
+        extract_pk(doc, id="override")  # kwargs takes precedence
+    """
+    # Check kwargs first (allows override)
+    from_kwargs = kwargs.get("_id") or kwargs.get("id") or kwargs.get("pk")
+    if from_kwargs:
+        return from_kwargs
+    # Fallback to doc object attribute
+    if doc is not None and hasattr(doc, "id"):
+        return getattr(doc, "id", None)
+    return None
 
 
 # ===========================================================================
@@ -166,7 +190,15 @@ def prepare_item_for_storage(doc: Dict[str, Any] | Any, *, store_text: bool = Tr
     """
     # Handle objects that implement 'dump' (e.g., Document)
     if hasattr(doc, "dump") and callable(getattr(doc, "dump")):
-        return doc.dump(store_text=store_text, use_dollar_vector=True)
+        item = doc.dump(store_text=store_text, use_dollar_vector=True)
+        # Ensure updated_timestamp is set for update operations
+        try:
+            from datetime import datetime, timezone
+
+            item.setdefault("updated_timestamp", datetime.now(timezone.utc).timestamp())
+        except Exception:
+            pass
+        return item
     # Dict-like path
     item: Dict[str, Any] = {}
     _id = doc.get("_id") or doc.get("id")  # type: ignore[attr-defined]
@@ -180,6 +212,13 @@ def prepare_item_for_storage(doc: Dict[str, Any] | Any, *, store_text: bool = Tr
     for k, v in doc.items():  # type: ignore
         if k not in ("_id", "id", "$vector", "vector", "text"):
             item[k] = v
+    # Ensure updated_timestamp is set for update operations
+    try:
+        from datetime import datetime, timezone
+
+        item.setdefault("updated_timestamp", datetime.now(timezone.utc).timestamp())
+    except Exception:
+        pass
     return item
 
 

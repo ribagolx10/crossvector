@@ -13,7 +13,7 @@ from crossvector import VectorDocument
 
 # Without ID - auto-generated based on PRIMARY_KEY_MODE
 doc = VectorDocument(text="Hello world")
-print(doc.id)  
+print(doc.id)
 # Possible values depending on PRIMARY_KEY_MODE:
 # - 'uuid' (default): Random UUID like "a1b2c3d4e5f6..."
 # - 'hash_text': SHA256 hash of text like "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e"

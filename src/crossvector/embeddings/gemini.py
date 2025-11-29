@@ -1,12 +1,10 @@
 """Concrete adapter for Google Gemini embedding models."""
 
-import logging
-import os
 from typing import Any, Dict, List, Optional
 
 from crossvector.abc import EmbeddingAdapter
-
-log = logging.getLogger(__name__)
+from crossvector.exceptions import InvalidFieldError, MissingConfigError, SearchError
+from crossvector.settings import settings as api_settings
 
 
 class GeminiEmbeddingAdapter(EmbeddingAdapter):
@@ -35,7 +33,7 @@ class GeminiEmbeddingAdapter(EmbeddingAdapter):
 
     def __init__(
         self,
-        model_name: str = "models/gemini-embedding-001",
+        model_name: str = api_settings.GEMINI_EMBEDDING_MODEL,
         api_key: Optional[str] = None,
         task_type: str = "retrieval_document",
         output_dimensionality: Optional[int] = None,
@@ -66,7 +64,8 @@ class GeminiEmbeddingAdapter(EmbeddingAdapter):
         """
         super().__init__(model_name)
         self._client = None
-        self._api_key = api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        # Prefer settings; allow explicit api_key override
+        self._api_key = api_key or api_settings.GOOGLE_API_KEY or api_settings.GEMINI_API_KEY
         self.task_type = task_type
         self.output_dimensionality = output_dimensionality
 
@@ -79,14 +78,16 @@ class GeminiEmbeddingAdapter(EmbeddingAdapter):
             # User specified dimension
             if "gemini-embedding-001" in self.model_name:
                 if output_dimensionality not in self._VALID_DIMENSIONS_GEMINI_001:
-                    raise ValueError(
-                        f"Invalid output_dimensionality {output_dimensionality} for gemini-embedding-001. "
-                        f"Valid options: {self._VALID_DIMENSIONS_GEMINI_001}"
+                    raise InvalidFieldError(
+                        "Invalid output_dimensionality for gemini-embedding-001",
+                        field="output_dimensionality",
+                        value=output_dimensionality,
+                        expected=self._VALID_DIMENSIONS_GEMINI_001,
                     )
                 self._embedding_dimension = output_dimensionality
             else:
                 # Other models don't support dynamic dimensionality
-                log.warning(
+                self.logger.warning(
                     f"output_dimensionality is only supported for gemini-embedding-001. Ignoring for {self.model_name}"
                 )
                 self._embedding_dimension = self._DEFAULT_DIMENSIONS.get(
@@ -98,7 +99,7 @@ class GeminiEmbeddingAdapter(EmbeddingAdapter):
                 self.model_name, self._DEFAULT_DIMENSIONS.get(model_name, 768)
             )
 
-        log.info(
+        self.logger.message(
             f"GeminiEmbeddingAdapter initialized: model={self.model_name}, "
             f"dimension={self._embedding_dimension}, task_type={self.task_type}"
         )
@@ -110,17 +111,21 @@ class GeminiEmbeddingAdapter(EmbeddingAdapter):
         """
         if self._client is None:
             if not self._api_key:
-                raise ValueError(
-                    "GOOGLE_API_KEY or GEMINI_API_KEY is not set. "
-                    "Please configure it in your .env file or pass it to the constructor."
+                raise MissingConfigError(
+                    "API key not configured",
+                    config_key="GOOGLE_API_KEY or GEMINI_API_KEY",
                 )
             try:
                 from google import genai
 
                 self._client = genai.Client(api_key=self._api_key)
-                log.info("Google Generative AI client initialized successfully.")
+                self.logger.message("Google Generative AI client initialized successfully.")
             except ImportError:
-                raise ImportError("google-genai package is not installed. Install it with: pip install google-genai")
+                raise MissingConfigError(
+                    "Required package not installed",
+                    config_key="google-genai",
+                    suggestion="pip install google-genai",
+                )
         return self._client
 
     @property
@@ -162,12 +167,16 @@ class GeminiEmbeddingAdapter(EmbeddingAdapter):
                 embedding = result.embeddings[0].values
                 results.append(embedding)
 
-            log.info(
+            self.logger.message(
                 f"Generated {len(results)} embeddings using {self.model_name} "
                 f"(dimension={len(results[0]) if results else 'N/A'})"
             )
             return results
 
         except Exception as e:
-            log.error(f"Failed to get embeddings from Gemini: {e}", exc_info=True)
-            raise
+            self.logger.error(f"Failed to get embeddings from Gemini: {e}", exc_info=True)
+            raise SearchError(
+                "Embedding generation failed",
+                model=self.model_name,
+                task_type=self.task_type,
+            ) from e

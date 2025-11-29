@@ -40,6 +40,9 @@ VECTOR_STORE_TEXT=true              # Store original text in database (true/fals
 # Primary key generation
 PRIMARY_KEY_MODE=uuid               # Mode: uuid, hash_text, hash_vector, int64, auto
 # PRIMARY_KEY_FACTORY=mymodule.custom_pk_generator  # Optional: custom PK factory function
+
+# Logging
+LOG_LEVEL=INFO                      # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
 ## Configuration Options
@@ -88,8 +91,8 @@ If you're only using embeddings for search and don't need to retrieve the origin
 from crossvector import VectorEngine
 
 engine = VectorEngine(
-    embedding_adapter=...,
-    db_adapter=...,
+    db=...,
+    embedding=...,
     collection_name="my_docs",
     store_text=False  # Don't store text, only embeddings and metadata
 )

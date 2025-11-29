@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
+from crossvector.exceptions import InvalidFieldError, MissingConfigError, SearchError
 
 
 class TestOpenAIEmbeddingAdapter:
@@ -19,7 +20,7 @@ class TestOpenAIEmbeddingAdapter:
 
     def test_initialization_invalid_model(self):
         """Test adapter initialization with unknown model."""
-        with pytest.raises(ValueError, match="Unknown embedding dimension"):
+        with pytest.raises(InvalidFieldError, match="Unknown embedding dimension"):
             OpenAIEmbeddingAdapter(model_name="unknown-model")
 
     def test_supported_models(self):
@@ -58,8 +59,7 @@ class TestOpenAIEmbeddingAdapter:
         mock_settings.OPENAI_API_KEY = None
 
         adapter = OpenAIEmbeddingAdapter(model_name="text-embedding-3-small")
-
-        with pytest.raises(ValueError, match="OPENAI_API_KEY is not set"):
+        with pytest.raises(MissingConfigError, match="API key not configured"):
             _ = adapter.client
 
     @patch("crossvector.embeddings.openai.OpenAI")
@@ -137,8 +137,7 @@ class TestOpenAIEmbeddingAdapter:
         mock_openai_class.return_value = mock_client
 
         adapter = OpenAIEmbeddingAdapter(model_name="text-embedding-3-small")
-
-        with pytest.raises(Exception, match="API Error"):
+        with pytest.raises(SearchError, match="Embedding generation failed"):
             adapter.get_embeddings(["test"])
 
 

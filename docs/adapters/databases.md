@@ -68,13 +68,13 @@ from typing import Any, Dict, List, Set, Optional, Union, Sequence, Tuple
 
 class MyCustomDBAdapter(VectorDBAdapter):
     """Custom vector database adapter implementation."""
-    
+
     use_dollar_vector: bool = False  # Set to True if your DB uses '$vector'
-    
+
     def initialize(
-        self, 
-        collection_name: str, 
-        embedding_dimension: int, 
+        self,
+        collection_name: str,
+        embedding_dimension: int,
         metric: str = "cosine",
         **kwargs: Any
     ) -> None:
@@ -99,8 +99,8 @@ class MyCustomDBAdapter(VectorDBAdapter):
         pass
 
     def upsert(
-        self, 
-        documents: List[VectorDocument], 
+        self,
+        documents: List[VectorDocument],
         batch_size: int = None
     ) -> List[VectorDocument]:
         """Insert new documents or update existing ones."""

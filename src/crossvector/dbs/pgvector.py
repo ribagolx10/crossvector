@@ -13,25 +13,34 @@ Key Features:
 """
 
 import json
-import logging
-import os
-from typing import Any, Dict, List, Sequence, Set, Tuple, Union
+from typing import Any, Dict, List, Set, Tuple
 
 import psycopg2
 import psycopg2.extras
 
 from crossvector.abc import VectorDBAdapter
 from crossvector.constants import VectorMetric
+from crossvector.exceptions import (
+    CollectionExistsError,
+    CollectionNotFoundError,
+    CollectionNotInitializedError,
+    DocumentExistsError,
+    DocumentNotFoundError,
+    DoesNotExist,
+    InvalidFieldError,
+    MissingDocumentError,
+    MissingFieldError,
+    MultipleObjectsReturned,
+)
 from crossvector.schema import VectorDocument
 from crossvector.settings import settings as api_settings
+from crossvector.types import DocIds
 from crossvector.utils import (
     apply_update_fields,
-    extract_id,
+    extract_pk,
     normalize_pks,
     prepare_item_for_storage,
 )
-
-log = logging.getLogger(__name__)
 
 
 class PGVectorAdapter(VectorDBAdapter):
@@ -55,11 +64,11 @@ class PGVectorAdapter(VectorDBAdapter):
         Args:
             **kwargs: Additional configuration options (currently unused)
         """
+        super(PGVectorAdapter, self).__init__(**kwargs)
         self._conn = None
         self._cursor = None
         self.collection_name: str | None = None
         self.embedding_dimension: int | None = None
-        log.info("PGVectorAdapter initialized.")
 
     @property
     def conn(self) -> Any:
@@ -73,13 +82,13 @@ class PGVectorAdapter(VectorDBAdapter):
         """
         if self._conn is None:
             self._conn = psycopg2.connect(
-                dbname=os.getenv("PGVECTOR_DBNAME", "postgres"),
-                user=os.getenv("PGVECTOR_USER", "postgres"),
-                password=os.getenv("PGVECTOR_PASSWORD", "postgres"),
-                host=os.getenv("PGVECTOR_HOST", "localhost"),
-                port=os.getenv("PGVECTOR_PORT", "5432"),
+                dbname=api_settings.PGVECTOR_DBNAME or "postgres",
+                user=api_settings.PGVECTOR_USER or "postgres",
+                password=api_settings.PGVECTOR_PASSWORD or "postgres",
+                host=api_settings.PGVECTOR_HOST or "localhost",
+                port=api_settings.PGVECTOR_PORT or "5432",
             )
-            log.info("PostgreSQL connection established.")
+            self.logger.message("PostgreSQL connection established.")
         return self._conn
 
     @property
@@ -116,7 +125,7 @@ class PGVectorAdapter(VectorDBAdapter):
         """
         self.store_text = store_text if store_text is not None else api_settings.VECTOR_STORE_TEXT
         self.get_collection(collection_name, embedding_dimension, metric)
-        log.info(
+        self.logger.message(
             f"PGVector initialized: collection='{collection_name}', "
             f"dimension={embedding_dimension}, metric={metric}, store_text={self.store_text}"
         )
@@ -133,12 +142,12 @@ class PGVectorAdapter(VectorDBAdapter):
             Collection name (table name)
 
         Raises:
-            ValueError: If table already exists
+            CollectionExistsError: If table already exists
         """
         self.cursor.execute(
             """
             SELECT EXISTS (
-                SELECT FROM information_schema.tables 
+                SELECT FROM information_schema.tables
                 WHERE table_name = %s
             )
             """,
@@ -146,7 +155,7 @@ class PGVectorAdapter(VectorDBAdapter):
         )
         exists = self.cursor.fetchone()[0]
         if exists:
-            raise ValueError(f"Collection '{collection_name}' already exists.")
+            raise CollectionExistsError("Collection already exists", collection_name=collection_name)
 
         self.collection_name = collection_name
         self.embedding_dimension = embedding_dimension
@@ -166,7 +175,7 @@ class PGVectorAdapter(VectorDBAdapter):
         """
         self.cursor.execute(create_table_sql)
         self.conn.commit()
-        log.info(f"PGVector table '{collection_name}' created. Store text: {self.store_text}")
+        self.logger.message(f"PGVector table '{collection_name}' created. Store text: {self.store_text}")
         return collection_name
 
     def get_collection(self, collection_name: str) -> str:
@@ -179,12 +188,12 @@ class PGVectorAdapter(VectorDBAdapter):
             Collection name (table name)
 
         Raises:
-            ValueError: If table doesn't exist
+            CollectionNotFoundError: If table doesn't exist
         """
         self.cursor.execute(
             """
             SELECT EXISTS (
-                SELECT FROM information_schema.tables 
+                SELECT FROM information_schema.tables
                 WHERE table_name = %s
             )
             """,
@@ -192,10 +201,10 @@ class PGVectorAdapter(VectorDBAdapter):
         )
         exists = self.cursor.fetchone()[0]
         if not exists:
-            raise ValueError(f"Collection '{collection_name}' does not exist.")
+            raise CollectionNotFoundError("Collection does not exist", collection_name=collection_name)
 
         self.collection_name = collection_name
-        log.info(f"PGVector table '{collection_name}' retrieved.")
+        self.logger.message(f"PGVector table '{collection_name}' retrieved.")
         return collection_name
 
     def get_or_create_collection(
@@ -239,7 +248,9 @@ class PGVectorAdapter(VectorDBAdapter):
             is_varchar = existing_type and "character varying" in existing_type.lower()
 
             if (desired_int64 and not is_int64) or ((not desired_int64) and not is_varchar):
-                log.info(f"PK type mismatch detected; recreating table '{collection_name}' with desired PK type.")
+                self.logger.message(
+                    f"PK type mismatch detected; recreating table '{collection_name}' with desired PK type."
+                )
                 self.cursor.execute(f"DROP TABLE IF EXISTS {collection_name}")
                 self.conn.commit()
 
@@ -253,7 +264,7 @@ class PGVectorAdapter(VectorDBAdapter):
         """
         self.cursor.execute(create_table_sql)
         self.conn.commit()
-        log.info(f"PGVector table '{collection_name}' initialized. Store text: {self.store_text}")
+        self.logger.message(f"PGVector table '{collection_name}' initialized. Store text: {self.store_text}")
         return collection_name
 
     def drop_collection(self, collection_name: str) -> bool:
@@ -268,7 +279,7 @@ class PGVectorAdapter(VectorDBAdapter):
         sql = f"DROP TABLE IF EXISTS {collection_name}"
         self.cursor.execute(sql)
         self.conn.commit()
-        log.info(f"PGVector collection '{collection_name}' dropped.")
+        self.logger.message(f"PGVector collection '{collection_name}' dropped.")
         return True
 
     def clear_collection(self) -> int:
@@ -278,10 +289,12 @@ class PGVectorAdapter(VectorDBAdapter):
             Number of documents deleted
 
         Raises:
-            ValueError: If collection_name is not set
+            CollectionNotInitializedError: If collection is not initialized
         """
         if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
+            raise CollectionNotInitializedError(
+                "Collection is not initialized", operation="clear_collection", adapter="PGVector"
+            )
 
         count = self.count()
         if count == 0:
@@ -290,7 +303,7 @@ class PGVectorAdapter(VectorDBAdapter):
         sql = f"TRUNCATE TABLE {self.collection_name}"
         self.cursor.execute(sql)
         self.conn.commit()
-        log.info(f"Cleared {count} documents from collection.")
+        self.logger.message(f"Cleared {count} documents from collection.")
         return count
 
     def count(self) -> int:
@@ -300,10 +313,10 @@ class PGVectorAdapter(VectorDBAdapter):
             Total document count
 
         Raises:
-            ValueError: If collection_name is not set
+            CollectionNotInitializedError: If collection is not initialized
         """
         if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="count", adapter="PGVector")
         sql = f"SELECT COUNT(*) FROM {self.collection_name}"
         self.cursor.execute(sql)
         return self.cursor.fetchone()["count"]
@@ -314,8 +327,8 @@ class PGVectorAdapter(VectorDBAdapter):
 
     def search(
         self,
-        vector: List[float],
-        limit: int,
+        vector: List[float] | None = None,
+        limit: int | None = None,
         offset: int = 0,
         where: Dict[str, Any] | None = None,
         fields: Set[str] | None = None,
@@ -333,14 +346,15 @@ class PGVectorAdapter(VectorDBAdapter):
             List of VectorDocument instances ordered by similarity
 
         Raises:
-            ValueError: If collection_name is not set
+            CollectionNotInitializedError: If collection is not initialized
         """
         if not self.collection_name:
-            raise ValueError("Table name must be set. Call initialize().")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="search", adapter="PGVector")
 
         # Construct SELECT query based on requested fields
-        select_fields = ["id", "vector <-> %s::vector AS score"]
-
+        select_fields = ["id"]
+        if vector is not None:
+            select_fields.append("vector <-> %s::vector AS score")
         if fields is None or "text" in fields:
             select_fields.append("text")
         if fields is None or "metadata" in fields:
@@ -348,7 +362,9 @@ class PGVectorAdapter(VectorDBAdapter):
 
         # Build WHERE clause for metadata filter
         where_clause = ""
-        params = [vector]
+        params: List[Any] = []
+        if vector is not None:
+            params.append(vector)
         if where:
             conditions = []
             for key, value in where.items():
@@ -356,8 +372,11 @@ class PGVectorAdapter(VectorDBAdapter):
                 params.extend([key, str(value)])
             where_clause = " WHERE " + " AND ".join(conditions)
 
+        if limit is None:
+            limit = api_settings.VECTOR_SEARCH_LIMIT
         params.extend([limit, offset])
-        sql = f"SELECT {', '.join(select_fields)} FROM {self.collection_name}{where_clause} ORDER BY score ASC LIMIT %s OFFSET %s"
+        order_clause = " ORDER BY score ASC" if vector is not None else ""
+        sql = f"SELECT {', '.join(select_fields)} FROM {self.collection_name}{where_clause}{order_clause} LIMIT %s OFFSET %s"
         self.cursor.execute(sql, tuple(params))
         results = self.cursor.fetchall()
 
@@ -369,70 +388,85 @@ class PGVectorAdapter(VectorDBAdapter):
                 doc_dict["text"] = r["text"]
             vector_docs.append(VectorDocument.from_kwargs(**doc_dict))
 
-        log.info(f"Vector search returned {len(vector_docs)} results.")
+        self.logger.message(f"Search returned {len(vector_docs)} results.")
         return vector_docs
 
     # ------------------------------------------------------------------
     # CRUD Operations
     # ------------------------------------------------------------------
 
-    def get(self, pk: Any = None, **kwargs) -> VectorDocument:
-        """Retrieve a single document by its ID.
+    def get(self, *args, **kwargs) -> VectorDocument:
+        """Retrieve a single document by its ID or metadata filter.
 
         Args:
-            pk: Primary key value (positional)
-            **kwargs: Alternative way to specify id via _id/id/pk keys
+            *args: Optional positional pk
+            **kwargs: Metadata fields for filtering (e.g., name="value", status="active")
+                     Special keys: pk/id/_id for direct lookup
 
         Returns:
             VectorDocument instance
 
         Raises:
-            ValueError: If collection not set or document ID missing/not found
+            CollectionNotInitializedError: If collection is not initialized
+            MissingFieldError: If neither pk nor metadata filters provided
+            DoesNotExist: If no document matches
+            MultipleObjectsReturned: If multiple documents match
         """
         if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="get", adapter="PGVector")
 
-        doc_id = pk or extract_id(kwargs)
-        if not doc_id:
-            raise ValueError("Document ID is required (provide pk or id/_id/pk in kwargs)")
+        pk = args[0] if args else None
+        doc_id = pk or extract_pk(None, **kwargs)
 
-        sql = f"SELECT id, vector, text, metadata FROM {self.collection_name} WHERE id = %s"
-        self.cursor.execute(sql, (doc_id,))
-        result = self.cursor.fetchone()
+        # Priority 1: Direct pk lookup
+        if doc_id:
+            sql = f"SELECT id, vector, text, metadata FROM {self.collection_name} WHERE id = %s LIMIT 2"
+            self.cursor.execute(sql, (doc_id,))
+            rows = self.cursor.fetchall()
+            if not rows:
+                raise DoesNotExist(f"Document with ID '{doc_id}' not found")
+            if len(rows) > 1:
+                raise MultipleObjectsReturned(f"Multiple documents found with ID '{doc_id}'")
+            result = rows[0]
+            doc_data = {
+                "_id": result["id"],
+                "vector": result["vector"],
+                "text": result["text"],
+                "metadata": result["metadata"] or {},
+            }
+            return VectorDocument.from_kwargs(**doc_data)
 
-        if not result:
-            raise ValueError(f"Document with ID '{doc_id}' not found")
+        # Priority 2: Search by metadata kwargs using search method
+        metadata_kwargs = {k: v for k, v in kwargs.items() if k not in ("pk", "id", "_id")}
+        if not metadata_kwargs:
+            raise MissingFieldError(
+                "Either pk/id/_id or metadata filter kwargs required", field="id or filter", operation="get"
+            )
 
-        doc_data = {
-            "_id": result["id"],
-            "vector": result["vector"],
-            "text": result["text"],
-            "metadata": result["metadata"] or {},
-        }
-        return VectorDocument.from_kwargs(**doc_data)
+        results = self.search(vector=None, where=metadata_kwargs, limit=2)
+        if not results:
+            raise DoesNotExist("No document found matching metadata filter")
+        if len(results) > 1:
+            raise MultipleObjectsReturned("Multiple documents found matching metadata filter")
+        return results[0]
 
-    def create(self, **kwargs: Any) -> VectorDocument:
+    def create(self, doc: VectorDocument) -> VectorDocument:
         """Create and persist a single document.
 
-        Expected kwargs:
-            vector/$vector: List[float] - Vector embedding (required)
-            text: str - Original text content (optional)
-            metadata: dict - Additional metadata (optional)
-            id/_id/pk: str - Explicit document ID (optional, auto-generated if missing)
-
         Args:
-            **kwargs: Document fields as keyword arguments
+            doc: VectorDocument instance to create
 
         Returns:
             Created VectorDocument instance
 
         Raises:
-            ValueError: If collection not set, vector missing, or document ID conflicts
+            CollectionNotInitializedError: If collection is not initialized
+            DocumentExistsError: If document ID already exists
+            InvalidFieldError: If vector missing
         """
         if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="create", adapter="PGVector")
 
-        doc = VectorDocument.from_kwargs(**kwargs)
         item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
 
         pk = doc.pk
@@ -440,11 +474,11 @@ class PGVectorAdapter(VectorDBAdapter):
         # Conflict check
         self.cursor.execute(f"SELECT 1 FROM {self.collection_name} WHERE id = %s", (pk,))
         if self.cursor.fetchone():
-            raise ValueError(f"Conflict: document with id '{pk}' already exists.")
+            raise DocumentExistsError("Document already exists", document_id=pk)
 
         vector = item.get("$vector") or item.get("vector")
         if vector is None:
-            raise ValueError("Vector required for create in PGVector.")
+            raise InvalidFieldError("Vector is required", field="vector", operation="create")
 
         text = item.get("text") if self.store_text else None
         metadata = {k: v for k, v in item.items() if k not in ("_id", "$vector", "vector", "text")}
@@ -454,68 +488,45 @@ class PGVectorAdapter(VectorDBAdapter):
             (pk, vector, text, json.dumps(metadata)),
         )
         self.conn.commit()
-        log.info(f"Created document with id '{pk}'.")
+        self.logger.message(f"Created document with id '{pk}'.")
         return doc
 
-    def get_or_create(self, defaults: Dict[str, Any] | None = None, **kwargs) -> Tuple[VectorDocument, bool]:
-        """Get a document by ID or create it if not found.
-
-        Args:
-            defaults: Default values to use when creating new document
-            **kwargs: Lookup fields and values (must include id/_id/pk)
-
-        Returns:
-            Tuple of (document, created) where created is True if new document was created
-
-        Raises:
-            ValueError: If collection_name is not set
-        """
-        if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
-
-        lookup_id = extract_id(kwargs)
-        if lookup_id:
-            try:
-                found = self.get(lookup_id)
-                return found, False
-            except ValueError:
-                pass
-
-        # Create new document with merged defaults
-        merged = {**(defaults or {}), **kwargs}
-        new_doc = self.create(**merged)
-        return new_doc, True
-
-    def update(self, **kwargs) -> VectorDocument:
+    def update(self, doc: VectorDocument, **kwargs) -> VectorDocument:
         """Update a single document by ID.
 
         Strict update semantics: raises error if document doesn't exist.
 
         Args:
-            **kwargs: Must include id/_id/pk, plus fields to update
+            doc: VectorDocument to update (must include id/pk)
 
         Returns:
             Updated VectorDocument instance
 
         Raises:
-            ValueError: If collection not set, ID missing, or document not found
+            CollectionNotInitializedError: If collection is not initialized
+            MissingFieldError: If ID missing
+            DocumentNotFoundError: If document not found
         """
         if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="update", adapter="PGVector")
 
-        id_val = extract_id(kwargs)
-        if not id_val:
-            raise ValueError("'id', '_id', or 'pk' is required for update")
+        pk = doc.id or extract_pk(None, **kwargs)
+        if not pk:
+            raise MissingFieldError("'id', '_id', or 'pk' is required for update", field="id", operation="update")
 
         # Get existing document
         sql = f"SELECT id, vector, text, metadata FROM {self.collection_name} WHERE id = %s"
-        self.cursor.execute(sql, (id_val,))
+        self.cursor.execute(sql, (pk,))
         existing = self.cursor.fetchone()
 
         if not existing:
-            raise ValueError(f"Document with ID '{id_val}' not found")
+            raise DocumentNotFoundError("Document not found", document_id=pk, operation="update")
 
-        prepared = prepare_item_for_storage(kwargs, store_text=self.store_text)
+        # Build update payload from doc
+        prepared = prepare_item_for_storage(
+            doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector),
+            store_text=self.store_text,
+        )
         updates: List[str] = []
         params: List[Any] = []
 
@@ -546,48 +557,16 @@ class PGVectorAdapter(VectorDBAdapter):
             }
             return VectorDocument.from_kwargs(**doc_data)
 
-        params.append(id_val)
+        params.append(pk)
         sql = f"UPDATE {self.collection_name} SET {', '.join(updates)} WHERE id = %s"
         self.cursor.execute(sql, tuple(params))
         self.conn.commit()
-        log.info(f"Updated document with id '{id_val}'.")
+        self.logger.message(f"Updated document with id '{pk}'.")
 
         # Return refreshed document
-        return self.get(id_val)
+        return self.get(pk)
 
-    def update_or_create(
-        self, defaults: Dict[str, Any] | None = None, create_defaults: Dict[str, Any] | None = None, **kwargs
-    ) -> Tuple[VectorDocument, bool]:
-        """Update document if exists, otherwise create with merged defaults.
-
-        Args:
-            defaults: Default values for both update and create
-            create_defaults: Default values used only when creating (overrides defaults)
-            **kwargs: Fields to update or use for creation
-
-        Returns:
-            Tuple of (document, created) where created is True if new document was created
-
-        Raises:
-            ValueError: If collection_name is not set
-        """
-        if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
-
-        lookup_id = extract_id(kwargs)
-        if lookup_id:
-            try:
-                updated = self.update(**kwargs)
-                return updated, False
-            except ValueError:
-                pass
-
-        # Create new document
-        merged = {**(create_defaults or defaults or {}), **kwargs}
-        new_doc = self.create(**merged)
-        return new_doc, True
-
-    def delete(self, ids: Union[str, Sequence[str]]) -> int:
+    def delete(self, ids: DocIds) -> int:
         """Delete document(s) by ID.
 
         Args:
@@ -597,10 +576,10 @@ class PGVectorAdapter(VectorDBAdapter):
             Number of documents deleted
 
         Raises:
-            ValueError: If collection_name is not set
+            CollectionNotInitializedError: If collection is not initialized
         """
         if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="delete", adapter="PGVector")
 
         pks = normalize_pks(ids)
         if not pks:
@@ -615,7 +594,7 @@ class PGVectorAdapter(VectorDBAdapter):
 
         self.conn.commit()
         deleted = self.cursor.rowcount
-        log.info(f"Deleted {deleted} document(s).")
+        self.logger.message(f"Deleted {deleted} document(s).")
         return deleted
 
     # ------------------------------------------------------------------
@@ -624,7 +603,7 @@ class PGVectorAdapter(VectorDBAdapter):
 
     def bulk_create(
         self,
-        documents: List[VectorDocument],
+        docs: List[VectorDocument],
         batch_size: int = None,
         ignore_conflicts: bool = False,
         update_conflicts: bool = False,
@@ -633,7 +612,7 @@ class PGVectorAdapter(VectorDBAdapter):
         """Bulk create multiple documents.
 
         Args:
-            documents: List of VectorDocument instances to create
+            docs: List of VectorDocument instances to create
             batch_size: Number of documents per batch (optional)
             ignore_conflicts: If True, skip conflicting documents
             update_conflicts: If True, update conflicting documents
@@ -643,17 +622,21 @@ class PGVectorAdapter(VectorDBAdapter):
             List of successfully created VectorDocument instances
 
         Raises:
-            ValueError: If collection not set, vector missing, or conflict occurs
+            CollectionNotInitializedError: If collection not set
+            InvalidFieldError: If vector missing
+            DocumentExistsError: If conflict occurs
         """
         if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
-        if not documents:
+            raise CollectionNotInitializedError(
+                "Collection is not initialized", operation="bulk_create", adapter="PGVector"
+            )
+        if not docs:
             return []
 
         created_docs: List[VectorDocument] = []
         batch: List[tuple] = []
 
-        for doc in documents:
+        for doc in docs:
             item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
             pk = doc.pk
 
@@ -670,11 +653,11 @@ class PGVectorAdapter(VectorDBAdapter):
                     update_kwargs = {"_id": pk, **update_doc}
                     self.update(**update_kwargs)
                     continue
-                raise ValueError(f"Conflict on id '{pk}' during bulk_create.")
+                raise DocumentExistsError("Document already exists", document_id=pk, operation="bulk_create")
 
             vector = item.get("$vector") or item.get("vector")
             if vector is None:
-                raise ValueError("Vector required for bulk_create in PGVector.")
+                raise InvalidFieldError("Vector is required", field="vector", operation="bulk_create")
 
             text = item.get("text") if self.store_text else None
             metadata = {k: v for k, v in item.items() if k not in ("_id", "$vector", "vector", "text")}
@@ -697,12 +680,12 @@ class PGVectorAdapter(VectorDBAdapter):
             )
 
         self.conn.commit()
-        log.info(f"Bulk created {len(created_docs)} document(s).")
+        self.logger.message(f"Bulk created {len(created_docs)} document(s).")
         return created_docs
 
     def bulk_update(
         self,
-        documents: List[VectorDocument],
+        docs: List[VectorDocument],
         batch_size: int = None,
         ignore_conflicts: bool = False,
         update_fields: List[str] = None,
@@ -710,7 +693,7 @@ class PGVectorAdapter(VectorDBAdapter):
         """Bulk update existing documents by ID.
 
         Args:
-            documents: List of VectorDocument instances to update
+            docs: List of VectorDocument instances to update
             batch_size: Number of updates per batch (optional)
             ignore_conflicts: If True, skip missing documents
             update_fields: Specific fields to update (None = all fields)
@@ -719,85 +702,115 @@ class PGVectorAdapter(VectorDBAdapter):
             List of successfully updated VectorDocument instances
 
         Raises:
-            ValueError: If collection not set or document missing (when ignore_conflicts=False)
+            CollectionNotInitializedError: If collection not set
+            MissingDocumentError: If document missing (when ignore_conflicts=False)
         """
         if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
-        if not documents:
+            raise CollectionNotInitializedError(
+                "Collection is not initialized", operation="bulk_update", adapter="PGVector"
+            )
+        if not docs:
             return []
 
-        updated_docs: List[VectorDocument] = []
-        missing: List[str] = []
-
-        for doc in documents:
+        # Collect all PKs and validate
+        doc_map: Dict[str, VectorDocument] = {}
+        for doc in docs:
             pk = doc.pk
             if not pk:
-                if ignore_conflicts:
-                    continue
-                missing.append("<no_id>")
+                if not ignore_conflicts:
+                    raise MissingDocumentError("Document missing ID", missing_ids=["<no_id>"], operation="bulk_update")
                 continue
+            doc_map[pk] = doc
 
-            # Check if exists
-            self.cursor.execute(f"SELECT 1 FROM {self.collection_name} WHERE id = %s", (pk,))
-            existing = self.cursor.fetchone()
+        if not doc_map:
+            return []
 
-            if not existing:
-                if ignore_conflicts:
-                    continue
-                missing.append(pk)
-                continue
+        # Fetch all existing documents in ONE query
+        pks = list(doc_map.keys())
+        placeholders = ",".join(["%s"] * len(pks))
+        self.cursor.execute(f"SELECT id FROM {self.collection_name} WHERE id IN ({placeholders})", pks)
+        existing_pks = {row[0] for row in self.cursor.fetchall()}
 
-            item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
-            update_doc = apply_update_fields(item, update_fields)
-
-            if not update_doc:
-                continue
-
-            # Build update query
-            update_kwargs = {"_id": pk, **update_doc}
-            self.update(**update_kwargs)
-            updated_docs.append(doc)
-
+        # Check for missing documents
+        missing = [pk for pk in pks if pk not in existing_pks]
         if missing:
-            raise ValueError(f"Missing documents for update: {missing}")
+            if not ignore_conflicts:
+                raise MissingDocumentError("Missing documents for update", missing_ids=missing, operation="bulk_update")
+            # Remove missing from processing
+            for pk in missing:
+                doc_map.pop(pk, None)
 
-        log.info(f"Bulk updated {len(updated_docs)} document(s).")
+        # Collect documents that exist for batch upsert
+        dataset: List[VectorDocument] = []
+        updated_docs: List[VectorDocument] = []
+
+        for pk, doc in doc_map.items():
+            if pk in existing_pks:
+                dataset.append(doc)
+                updated_docs.append(doc)
+
+        # Batch upsert all collected documents
+        if dataset:
+            self.upsert(dataset, batch_size=batch_size)
         return updated_docs
 
-    def upsert(self, documents: List[VectorDocument], batch_size: int = None) -> List[VectorDocument]:
+    def upsert(self, docs: List[VectorDocument], batch_size: int = None) -> List[VectorDocument]:
         """Insert or update multiple documents.
 
         Args:
-            documents: List of VectorDocument instances to upsert
+            docs: List of VectorDocument instances to upsert
             batch_size: Number of documents per batch (optional)
 
         Returns:
             List of upserted VectorDocument instances
 
         Raises:
-            ValueError: If collection_name is not set
+            CollectionNotInitializedError: If collection is not initialized
+            InvalidFieldError: If any document is missing a vector
         """
         if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
-        if not documents:
+            raise CollectionNotInitializedError("Collection is not initialized", operation="upsert", adapter="PGVector")
+        if not docs:
             return []
 
-        for doc in documents:
+        batch: List[Tuple[Any, Any, Any, str]] = []
+        upserted: List[VectorDocument] = []
+
+        for doc in docs:
             item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
             doc_id = doc.pk
             vector = item.get("$vector") or item.get("vector")
+            if vector is None:
+                raise InvalidFieldError("Vector is required", field="vector", operation="upsert")
             text = item.get("text") if self.store_text else None
             metadata = {k: v for k, v in item.items() if k not in ("_id", "$vector", "vector", "text")}
             metadata_json = json.dumps(metadata)
+            batch.append((doc_id, vector, text, metadata_json))
+            upserted.append(doc)
 
-            sql = f"""
-            INSERT INTO {self.collection_name} (id, vector, text, metadata) 
-            VALUES (%s, %s, %s, %s) 
-            ON CONFLICT (id) DO UPDATE 
-            SET vector = EXCLUDED.vector, text = EXCLUDED.text, metadata = EXCLUDED.metadata
-            """
-            self.cursor.execute(sql, (doc_id, vector, text, metadata_json))
+            if batch_size and batch_size > 0 and len(batch) >= batch_size:
+                self._flush_upsert_batch(batch)
+                batch.clear()
+
+        if batch:
+            self._flush_upsert_batch(batch)
 
         self.conn.commit()
-        log.info(f"Upserted {len(documents)} document(s).")
-        return documents
+        self.logger.message(f"Upserted {len(upserted)} document(s).")
+        return upserted
+
+    def _flush_upsert_batch(self, batch: List[Tuple[Any, Any, Any, str]]) -> None:
+        """Execute a batch of upsert operations using ON CONFLICT.
+
+        Args:
+            batch: List of tuples (id, vector, text, metadata_json)
+        """
+        sql = f"""
+        INSERT INTO {self.collection_name} (id, vector, text, metadata)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (id) DO UPDATE
+        SET vector = EXCLUDED.vector,
+            text = EXCLUDED.text,
+            metadata = EXCLUDED.metadata
+        """
+        self.cursor.executemany(sql, batch)

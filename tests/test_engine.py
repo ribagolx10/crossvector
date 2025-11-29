@@ -1,6 +1,7 @@
 """Tests for VectorEngine core functionality."""
 
 from typing import Any, Dict, List, Sequence, Set, Union
+
 from crossvector import VectorEngine
 from crossvector.abc import EmbeddingAdapter, VectorDBAdapter
 from crossvector.schema import VectorDocument
@@ -48,9 +49,7 @@ class MockDBAdapter(VectorDBAdapter):
     def get_or_create_collection(self, collection_name: str, dimension: int, metric: str = "cosine"):
         return f"mock_collection_{collection_name}"
 
-    def upsert(
-        self, documents: List[VectorDocument], batch_size: int | None = None
-    ) -> List[VectorDocument]:
+    def upsert(self, documents: List[VectorDocument], batch_size: int | None = None) -> List[VectorDocument]:
         result = []
         for doc in documents:
             doc_dict = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=True)
@@ -113,7 +112,7 @@ class MockDBAdapter(VectorDBAdapter):
             text = doc_dict.get("text")
             metadata = {k: v for k, v in doc_dict.items() if k not in ("_id", "$vector", "vector", "text")}
             all_docs.append(VectorDocument(id=pk, vector=vector, text=text, metadata=metadata))
-        
+
         # Apply offset and limit
         return all_docs[offset : offset + limit]
 
@@ -121,7 +120,7 @@ class MockDBAdapter(VectorDBAdapter):
         doc_dict = self.documents.get(pk)
         if not doc_dict:
             raise ValueError(f"Document with pk {pk} not found")
-        
+
         vector = doc_dict.get("$vector") or doc_dict.get("vector") or []
         text = doc_dict.get("text")
         metadata = {k: v for k, v in doc_dict.items() if k not in ("_id", "$vector", "vector", "text")}
@@ -181,66 +180,53 @@ class TestVectorEngine:
 
     def test_engine_initialization(self):
         """Test that engine initializes correctly."""
-        embedding_adapter = MockEmbeddingAdapter()
-        db_adapter = MockDBAdapter()
+        embedding = MockEmbeddingAdapter()
+        db = MockDBAdapter()
 
-        engine = VectorEngine(
-            embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name="test_collection"
-        )
+        engine = VectorEngine(embedding=embedding, db=db, collection_name="test_collection")
 
-        assert engine.embedding_adapter == embedding_adapter
-        assert engine.db_adapter == db_adapter
+        assert engine.embedding == embedding
+        assert engine.db == db
         assert engine.collection_name == "test_collection"
-        assert db_adapter.collection_initialized
+        assert db.collection_initialized
 
-    def test_create_from_texts(self, sample_documents):
-        """Test creating documents from texts."""
-        embedding_adapter = MockEmbeddingAdapter()
-        db_adapter = MockDBAdapter()
+    def test_bulk_create_from_texts(self, sample_documents):
+        """Test creating documents from text strings."""
+        embedding = MockEmbeddingAdapter()
+        db = MockDBAdapter()
 
-        engine = VectorEngine(
-            embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name="test_collection"
-        )
+        engine = VectorEngine(embedding=embedding, db=db, collection_name="test_collection")
 
-        # Create documents from texts
-        result = engine.create_from_texts(
-            texts=sample_documents["texts"][:3],
-            metadatas=sample_documents["metadatas"][:3],
-            pks=sample_documents["pks"][:3],
-        )
+        # Create documents from plain strings
+        texts = sample_documents["texts"][:3]
+        result = engine.bulk_create(texts)
 
         assert len(result) == 3
-        assert db_adapter.count() == 3
+        assert db.count() == 3
         assert all(isinstance(doc, VectorDocument) for doc in result)
 
-    def test_create_empty_texts(self):
-        """Test creating from empty text list."""
-        embedding_adapter = MockEmbeddingAdapter()
-        db_adapter = MockDBAdapter()
+    def test_bulk_create_empty_list(self):
+        """Test creating from empty list."""
+        embedding = MockEmbeddingAdapter()
+        db = MockDBAdapter()
 
-        engine = VectorEngine(
-            embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name="test_collection"
-        )
+        engine = VectorEngine(embedding=embedding, db=db, collection_name="test_collection")
 
-        result = engine.create_from_texts(texts=[])
+        result = engine.bulk_create([])
 
         assert len(result) == 0
-        assert db_adapter.count() == 0
+        assert db.count() == 0
 
     def test_search_documents(self, sample_documents):
         """Test searching documents."""
-        embedding_adapter = MockEmbeddingAdapter()
-        db_adapter = MockDBAdapter()
+        embedding = MockEmbeddingAdapter()
+        db = MockDBAdapter()
 
-        engine = VectorEngine(
-            embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name="test_collection"
-        )
+        engine = VectorEngine(embedding=embedding, db=db, collection_name="test_collection")
 
         # First create some documents
-        engine.create_from_texts(
-            texts=sample_documents["texts"][:3],
-            pks=sample_documents["pks"][:3],
-        )
+        docs = [{"id": sample_documents["pks"][i], "text": sample_documents["texts"][i]} for i in range(3)]
+        engine.bulk_create(docs)
 
         # Then search
         results = engine.search("test query", limit=2)
@@ -250,18 +236,13 @@ class TestVectorEngine:
 
     def test_get_document(self, sample_documents):
         """Test retrieving a document by ID."""
-        embedding_adapter = MockEmbeddingAdapter()
-        db_adapter = MockDBAdapter()
+        embedding = MockEmbeddingAdapter()
+        db = MockDBAdapter()
 
-        engine = VectorEngine(
-            embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name="test_collection"
-        )
+        engine = VectorEngine(embedding=embedding, db=db, collection_name="test_collection")
 
         # Create a document
-        engine.create_from_texts(
-            texts=[sample_documents["texts"][0]],
-            pks=[sample_documents["pks"][0]],
-        )
+        engine.bulk_create([{"id": sample_documents["pks"][0], "text": sample_documents["texts"][0]}])
 
         # Get it back
         doc = engine.get(sample_documents["pks"][0])
@@ -272,39 +253,31 @@ class TestVectorEngine:
 
     def test_count_documents(self, sample_documents):
         """Test counting documents."""
-        embedding_adapter = MockEmbeddingAdapter()
-        db_adapter = MockDBAdapter()
+        embedding = MockEmbeddingAdapter()
+        db = MockDBAdapter()
 
-        engine = VectorEngine(
-            embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name="test_collection"
-        )
+        engine = VectorEngine(embedding=embedding, db=db, collection_name="test_collection")
 
         # Initially 0
         assert engine.count() == 0
 
         # Create 3 documents
-        engine.create_from_texts(
-            texts=sample_documents["texts"][:3],
-            pks=sample_documents["pks"][:3],
-        )
+        docs = [{"id": sample_documents["pks"][i], "text": sample_documents["texts"][i]} for i in range(3)]
+        engine.bulk_create(docs)
 
         # Should be 3
         assert engine.count() == 3
 
     def test_delete_one_document(self, sample_documents):
         """Test deleting a single document."""
-        embedding_adapter = MockEmbeddingAdapter()
-        db_adapter = MockDBAdapter()
+        embedding = MockEmbeddingAdapter()
+        db = MockDBAdapter()
 
-        engine = VectorEngine(
-            embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name="test_collection"
-        )
+        engine = VectorEngine(embedding=embedding, db=db, collection_name="test_collection")
 
         # Create documents
-        engine.create_from_texts(
-            texts=sample_documents["texts"][:3],
-            pks=sample_documents["pks"][:3],
-        )
+        docs = [{"id": sample_documents["pks"][i], "text": sample_documents["texts"][i]} for i in range(3)]
+        engine.bulk_create(docs)
         assert engine.count() == 3
 
         # Delete single document
@@ -315,18 +288,14 @@ class TestVectorEngine:
 
     def test_delete_many_documents(self, sample_documents):
         """Test deleting multiple documents."""
-        embedding_adapter = MockEmbeddingAdapter()
-        db_adapter = MockDBAdapter()
+        embedding = MockEmbeddingAdapter()
+        db = MockDBAdapter()
 
-        engine = VectorEngine(
-            embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name="test_collection"
-        )
+        engine = VectorEngine(embedding=embedding, db=db, collection_name="test_collection")
 
         # Create documents
-        engine.create_from_texts(
-            texts=sample_documents["texts"][:5],
-            pks=sample_documents["pks"][:5],
-        )
+        docs = [{"id": sample_documents["pks"][i], "text": sample_documents["texts"][i]} for i in range(5)]
+        engine.bulk_create(docs)
         assert engine.count() == 5
 
         # Delete multiple
@@ -338,12 +307,10 @@ class TestVectorEngine:
 
     def test_delete_empty_list(self):
         """Test deleting with empty ID list."""
-        embedding_adapter = MockEmbeddingAdapter()
-        db_adapter = MockDBAdapter()
+        embedding = MockEmbeddingAdapter()
+        db = MockDBAdapter()
 
-        engine = VectorEngine(
-            embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name="test_collection"
-        )
+        engine = VectorEngine(embedding=embedding, db=db, collection_name="test_collection")
 
         deleted_count = engine.delete([])
 
@@ -351,49 +318,41 @@ class TestVectorEngine:
 
     def test_document_format(self, sample_documents):
         """Test that documents are formatted correctly for DB adapter."""
-        embedding_adapter = MockEmbeddingAdapter()
-        db_adapter = MockDBAdapter()
+        embedding = MockEmbeddingAdapter()
+        db = MockDBAdapter()
 
-        engine = VectorEngine(
-            embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name="test_collection"
-        )
+        engine = VectorEngine(embedding=embedding, db=db, collection_name="test_collection")
 
         # Create a document
-        docs = engine.create_from_texts(
-            texts=[sample_documents["texts"][0]],
-            pks=[sample_documents["pks"][0]],
-        )
+        engine.bulk_create([{"id": sample_documents["pks"][0], "text": sample_documents["texts"][0]}])
 
         # Check the stored document format
-        stored_doc = db_adapter.documents[sample_documents["pks"][0]]
+        stored_doc = db.documents[sample_documents["pks"][0]]
 
         assert "_id" in stored_doc
         assert "$vector" in stored_doc or "vector" in stored_doc
         assert stored_doc["_id"] == sample_documents["pks"][0]
         vector_key = "$vector" if "$vector" in stored_doc else "vector"
-        assert len(stored_doc[vector_key]) == embedding_adapter.embedding_dimension
+        assert len(stored_doc[vector_key]) == embedding.embedding_dimension
 
     def test_create_without_store_text(self, sample_documents):
         """Test creating documents with store_text=False."""
-        embedding_adapter = MockEmbeddingAdapter()
-        db_adapter = MockDBAdapter()
+        embedding = MockEmbeddingAdapter()
+        db = MockDBAdapter()
 
         # Initialize engine with store_text=False
         engine = VectorEngine(
-            embedding_adapter=embedding_adapter,
-            db_adapter=db_adapter,
+            embedding=embedding,
+            db=db,
             collection_name="test_collection",
             store_text=False,
         )
 
         # Create a document
-        engine.create_from_texts(
-            texts=[sample_documents["texts"][0]],
-            pks=[sample_documents["pks"][0]],
-        )
+        engine.bulk_create([{"id": sample_documents["pks"][0], "text": sample_documents["texts"][0]}])
 
         # Check the stored document format
-        stored_doc = db_adapter.documents[sample_documents["pks"][0]]
+        stored_doc = db.documents[sample_documents["pks"][0]]
 
         assert "_id" in stored_doc
         vector_key = "$vector" if "$vector" in stored_doc else "vector"
@@ -401,20 +360,18 @@ class TestVectorEngine:
         # Text should NOT be present
         assert "text" not in stored_doc
         assert stored_doc["_id"] == sample_documents["pks"][0]
-        assert len(stored_doc[vector_key]) == embedding_adapter.embedding_dimension
+        assert len(stored_doc[vector_key]) == embedding.embedding_dimension
 
     def test_auto_generated_pk(self):
         """Test that pk is automatically generated if not provided."""
-        embedding_adapter = MockEmbeddingAdapter()
-        db_adapter = MockDBAdapter()
+        embedding = MockEmbeddingAdapter()
+        db = MockDBAdapter()
 
-        engine = VectorEngine(
-            embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name="test_collection"
-        )
+        engine = VectorEngine(embedding=embedding, db=db, collection_name="test_collection")
 
-        # Create document without providing pk
+        # Create document without providing pk (just text string)
         text = "This is a test document without ID."
-        docs = engine.create_from_texts(texts=[text], pks=[None])
+        docs = engine.bulk_create([text])
 
         assert len(docs) == 1
         assert docs[0].pk is not None

@@ -16,6 +16,8 @@ Simplify your vector search infrastructure with a single, unified API across all
 - 📦 **Install Only What You Need**: Optional dependencies per adapter
 - 🔒 **Type-Safe**: Full Pydantic validation
 - 🔄 **Consistent API**: Same interface across all adapters
+- 🧭 **Centralized Logging**: Unified `Logger` with configurable `LOG_LEVEL`
+- ❗ **Specific Exceptions**: Clear errors like `MissingFieldError`, `InvalidFieldError`, `MissingConfigError`
 
 ## Supported Vector Databases
 

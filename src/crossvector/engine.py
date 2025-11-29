@@ -7,323 +7,644 @@ a convenient wrapper around the ABC interface with automatic embedding
 generation and flexible input handling.
 """
 
-import logging
-from typing import Any, Dict, List, Sequence, Set, Union
+from typing import Any, Dict, List, Optional, Set, Union
 
 from crossvector.settings import settings
 
 from .abc import EmbeddingAdapter, VectorDBAdapter
+from .exceptions import CrossVectorError, InvalidFieldError, MismatchError, MissingFieldError
+from .logger import Logger
 from .schema import VectorDocument
-from .utils import normalize_texts, normalize_metadatas, normalize_pks
-
-log = logging.getLogger(__name__)
+from .types import Doc, DocIds
+from .utils import extract_pk
 
 
 class VectorEngine:
-    """
-    Orchestrates vector database and embedding operations using adapters.
+    """High-level orchestrator for vector database operations with automatic embedding.
+
+    VectorEngine provides a unified, flexible interface for working with vector databases.
+    It handles automatic embedding generation, flexible document input formats, and provides
+    both single-document and batch operations following Django-style semantics.
+
+    Key Features:
+        - Flexible input: accepts str, dict, or VectorDocument for all operations
+        - Automatic embedding generation for text without vectors
+        - Batch operations with optimized bulk embedding
+        - Django-style get_or_create and update_or_create patterns
+        - Pluggable database and embedding adapters
+
+    Attributes:
+        collection_name: Active collection name
+        store_text: Whether to store original text alongside vectors
+        db: Database adapter instance
+        embedding: Embedding adapter instance
     """
 
     def __init__(
         self,
-        embedding_adapter: EmbeddingAdapter,
-        db_adapter: VectorDBAdapter,
+        db: VectorDBAdapter,
+        embedding: EmbeddingAdapter,
         collection_name: str = settings.ASTRA_DB_COLLECTION_NAME,
         store_text: bool = settings.VECTOR_STORE_TEXT,
-    ):
-        """
-        Initializes the engine with specific adapters.
+    ) -> None:
+        """Initialize VectorEngine with database and embedding adapters.
 
         Args:
-            embedding_adapter: An instance of an EmbeddingAdapter subclass.
-            db_adapter: An instance of a VectorDBAdapter subclass.
-            collection_name: The name of the collection to work with.
-            store_text: Whether to store the original text content in the database.
+            db: Database adapter implementing VectorDBAdapter interface
+            embedding: Embedding adapter implementing EmbeddingAdapter interface
+            collection_name: Name of the collection to use (default from settings)
+            store_text: Whether to store original text with vectors (default from settings)
+
+        Note:
+            Automatically initializes the underlying collection if the adapter supports it.
         """
-        self.embedding_adapter = embedding_adapter
-        self.db_adapter = db_adapter
+        self._db = db
+        self._embedding = embedding
         self.collection_name = collection_name
         self.store_text = store_text
-
-        log.info(
-            f"VectorEngine initialized with "
-            f"EmbeddingAdapter: {embedding_adapter.__class__.__name__}, "
-            f"DBAdapter: {db_adapter.__class__.__name__}, "
-            f"store_text: {store_text}, "
-            f"pk_mode: {settings.PRIMARY_KEY_MODE}."
+        self.logger = Logger(self.__class__.__name__)
+        # Initialize underlying collection if adapter supports it
+        try:
+            self._db.initialize(
+                collection_name=collection_name,
+                embedding_dimension=self._embedding.embedding_dimension,
+                metric="cosine",
+                store_text=store_text,
+            )
+        except AttributeError:
+            # Optional for adapters that don't need explicit initialization
+            pass
+        self.logger.message(
+            "VectorEngine initialized: db=%s embedding=%s store_text=%s",
+            db.__class__.__name__,
+            embedding.__class__.__name__,
+            store_text,
         )
 
-        # Initialize the database collection
-        self.db_adapter.initialize(
-            collection_name=self.collection_name,
-            embedding_dimension=self.embedding_adapter.embedding_dimension,
-            store_text=self.store_text,
-        )
+    @property
+    def db(self) -> VectorDBAdapter:
+        """Access the database adapter instance."""
+        return self._db
 
-    def drop_collection(self, collection_name: str) -> bool:
-        """
-        Drops the collection.
-        """
-        return self.db_adapter.drop_collection(collection_name)
+    @property
+    def adapter(self) -> VectorDBAdapter:
+        """Access the database adapter (alias for db property)."""
+        return self._db
 
-    def clear_collection(self) -> Dict[str, Any]:
-        """
-        Deletes all documents from the collection. A dangerous operation.
-        """
-        log.warning(f"Clearing all documents from collection '{self.collection_name}'.")
-        deleted_count = self.db_adapter.clear_collection()
-        return {"deleted_count": deleted_count}
+    @property
+    def embedding(self) -> EmbeddingAdapter:
+        """Access the embedding adapter instance."""
+        return self._embedding
 
-    def count(self) -> int:
-        """
-        Returns the total number of documents in the collection.
-        """
-        count = self.db_adapter.count()
-        log.info(f"Collection '{self.collection_name}' has {count} documents.")
-        return count
-
-    def search(
+    # ------------------------------------------------------------------
+    # Internal normalization helpers
+    # ------------------------------------------------------------------
+    def _doc_rebuild(
         self,
-        query: str,
-        limit: int = 5,
-        offset: int = 0,
-        where: Dict[str, Any] | None = None,
-        fields: Set[str] | None = None,
-    ) -> List[VectorDocument]:
-        """
-        Perform vector similarity search with automatic query embedding.
+        doc: Optional[Doc] = None,
+        *,
+        text: str | None = None,
+        vector: List[float] | None = None,
+        metadata: Dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> VectorDocument:
+        """Normalize flexible document inputs into a VectorDocument.
+
+        Accepts multiple input formats (str, dict, VectorDocument) and optional
+        builder parameters, merging them into a single VectorDocument. Does not
+        generate embeddings - that's left to the caller.
 
         Args:
-            query: Search query text
-            limit: Maximum number of results to return (default: 5)
-            offset: Number of results to skip for pagination (default: 0)
-            where: Optional metadata filter conditions
-            fields: Optional set of field names to include in results
+            doc: Flexible document input (str | dict | VectorDocument | None)
+            text: Optional text content (overrides doc.text if provided)
+            vector: Optional vector embedding (overrides doc.vector if provided)
+            metadata: Optional metadata dict (merged with doc.metadata if provided)
+            **kwargs: Additional metadata fields or id/_id/pk for primary key
 
         Returns:
-            List of VectorDocument instances ordered by similarity
-
-        Examples:
-            # Simple search
-            docs = engine.search("machine learning", limit=10)
-            for doc in docs:
-                print(doc.text, doc.metadata)
-
-            # Search with pagination
-            docs = engine.search("AI", limit=10, offset=20)
-
-            # Search with metadata filter
-            docs = engine.search("python", where={"category": "tutorial", "level": "beginner"})
-
-        TODO: Add rerank feature in next version
-              - Support reranking with Cohere, Jina, or custom rerankers
-              - Allow hybrid search (vector + keyword)
-              - Add score fusion strategies
+            Normalized VectorDocument instance
         """
-        log.info(f"Executing search with query: '{query[:50]}...', limit={limit}, offset={offset}")
+        if isinstance(doc, VectorDocument):
+            return doc
 
-        # Generate query embedding
-        query_embedding = self.embedding_adapter.get_embeddings([query])[0]
+        base: Dict[str, Any] = {}
+        if isinstance(doc, dict):
+            base.update(doc)
+        elif isinstance(doc, str):
+            base["text"] = doc
+        if text is not None:
+            base["text"] = text
+        if vector is not None:
+            base["vector"] = vector
+        if metadata is not None:
+            base["metadata"] = metadata
 
-        # Perform search with all parameters
-        vector_docs = self.db_adapter.search(
-            vector=query_embedding,
-            limit=limit,
-            offset=offset,
-            where=where,
-            fields=fields,
-        )
+        # Normalize id/_id/pk
+        pk = extract_pk(None, **base, **kwargs)
+        if pk is not None:
+            base["id"] = pk
 
-        log.info(f"Search operation found {len(vector_docs)} results.")
+        return VectorDocument.from_any(base, **kwargs)
 
-        # TODO: Add rerank step here
-        # if rerank_params:
-        #     vector_docs = self._rerank(vector_docs, query, rerank_params)
+    def _doc_prepare_many(self, docs: list[Doc]) -> list[VectorDocument]:
+        """Normalize flexible docs and batch-generate missing embeddings.
 
-        return vector_docs
-
-    def get(self, pk: str) -> VectorDocument:
-        """
-        Retrieve a single document by its primary key.
+        Processes a list of flexible document inputs, normalizes each to VectorDocument,
+        identifies documents missing vectors, and generates embeddings in a single
+        batch call (avoiding N separate embedding API calls).
 
         Args:
-            pk: Primary key of the document to retrieve
+            docs: List of flexible document inputs (str | dict | VectorDocument)
 
         Returns:
-            VectorDocument instance
+            List of normalized VectorDocuments with all vectors populated
+
+        Note:
+            Documents without text or vector are logged and skipped.
+        """
+        normalized: list[VectorDocument] = []
+        to_embed_indices: list[int] = []
+        texts_to_embed: list[str] = []
+        for item in docs:
+            doc_obj = self._doc_rebuild(item)
+            # Skip invalid docs (no vector & no text)
+            if (not doc_obj.vector) and (not doc_obj.text):
+                self.logger.warning("Skipping doc without text/vector id=%s", doc_obj.id)
+                continue
+            if (not doc_obj.vector) and doc_obj.text:
+                to_embed_indices.append(len(normalized))
+                texts_to_embed.append(doc_obj.text)
+            normalized.append(doc_obj)
+        if texts_to_embed:
+            embeddings = self.embedding.get_embeddings(texts_to_embed)
+            for local_idx, emb in zip(to_embed_indices, embeddings):
+                normalized[local_idx].vector = emb
+        return normalized
+
+    # ------------------------------------------------------------------
+    # Single document operations
+    # ------------------------------------------------------------------
+    def create(
+        self,
+        doc: Optional[Doc] = None,
+        *,
+        text: str | None = None,
+        vector: List[float] | None = None,
+        metadata: Dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> VectorDocument:
+        """Create a new vector document with automatic embedding generation.
+
+        Accepts flexible input formats and automatically generates embeddings for
+        text content when no vector is provided. Supports explicit primary keys
+        or automatic generation.
+
+        Args:
+            doc: Document input (str | dict | VectorDocument | None)
+            text: Optional text content (overrides doc text)
+            vector: Optional precomputed vector (skips embedding if provided)
+            metadata: Optional metadata dict
+            **kwargs: Additional metadata fields or id/_id/pk for primary key
+
+        Returns:
+            Created VectorDocument with populated vector and id
 
         Raises:
-            ValueError: If document not found
+            InvalidFieldError: If neither text nor vector is provided
 
         Examples:
-            doc = engine.get("doc_id_123")
-            print(doc.text, doc.metadata)
+            >>> engine.create("Hello world")
+            >>> engine.create({"text": "Hello", "source": "api"})
+            >>> engine.create(text="Hello", metadata={"lang": "en"})
+            >>> engine.create({"id": "doc123", "text": "Hello"})
         """
-        log.info(f"Retrieving document with pk: {pk}")
-        return self.db_adapter.get(pk=pk)
+        # Normalize using a single helper
+        doc = self._doc_rebuild(doc, text=text, vector=vector, metadata=metadata, **kwargs)
 
-    def delete(self, ids: Union[str, Sequence[str]]) -> int:
-        """
-        Delete document(s) by primary key.
+        # Auto-embed if needed
+        if (not doc.vector) and doc.text:
+            doc.vector = self.embedding.get_embeddings([doc.text])[0]
+        if not doc.vector:
+            raise InvalidFieldError("Document requires vector or text", field="vector", operation="create")
+
+        self.logger.message("Create pk=%s", doc.id)
+        return self.db.create(doc)
+
+    def get(self, *args, **kwargs: Any) -> VectorDocument:
+        """Retrieve a single document by primary key or metadata filter.
+
+        Supports Django-style lookup patterns. Primary key takes precedence
+        over metadata filters.
 
         Args:
-            ids: Single document pk or list of pks to delete
+            *args: Positional arguments (typically primary key as first arg)
+            **kwargs: Keyword arguments for metadata filtering
+
+        Returns:
+            Matching VectorDocument
+
+        Raises:
+            DoesNotExist: If document not found
+            MultipleObjectsReturned: If multiple documents match the filter
+
+        Examples:
+            >>> engine.get("doc123")
+            >>> engine.get(source="api", category="tech")
+        """
+        return self.db.get(*args, **kwargs)
+
+    def update(
+        self,
+        doc: Doc,
+        *,
+        text: str | None = None,
+        vector: List[float] | None = None,
+        metadata: Dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> VectorDocument:
+        """Update an existing document with automatic embedding regeneration.
+
+        Updates the specified document, regenerating embeddings if text changes
+        without a corresponding vector update. Requires explicit primary key.
+
+        Args:
+            doc: Document to update (str | dict | VectorDocument) - must include id
+            text: Optional new text content
+            vector: Optional new vector (skips embedding if provided with text)
+            metadata: Optional metadata updates
+            **kwargs: Additional metadata fields
+
+        Returns:
+            Updated VectorDocument
+
+        Raises:
+            MissingFieldError: If id is missing
+            DocumentNotFoundError: If document not found
+
+        Examples:
+            >>> engine.update({"id": "doc123", "text": "New content"})
+            >>> engine.update("doc123", text="Updated text", category="news")
+        """
+        # Normalize using a single helper
+        doc = self._doc_rebuild(doc, text=text, vector=vector, metadata=metadata, **kwargs)
+
+        # Ensure we have an id
+        if doc.id is None:
+            raise MissingFieldError("Cannot update without id", field="id", operation="update")
+
+        # Auto-embed if text present and vector missing
+        if (not doc.vector) and doc.text:
+            doc.vector = self.embedding.get_embeddings([doc.text])[0]
+
+        self.logger.message("Update pk=%s", doc.id)
+        return self.db.update(doc, **kwargs)
+
+    def delete(self, ids: DocIds) -> int:
+        """Delete one or more documents by primary key.
+
+        Args:
+            ids: Single document ID (str) or sequence of IDs to delete
 
         Returns:
             Number of documents successfully deleted
 
         Examples:
-            # Single document
-            count = engine.delete("doc_id")
-
-            # Multiple documents
-            count = engine.delete(["doc1", "doc2", "doc3"])
+            >>> engine.delete("doc123")
+            >>> engine.delete(["doc1", "doc2", "doc3"])
         """
-        log.info(f"Deleting document(s): {ids}")
-        return self.db_adapter.delete(ids)
+        self.logger.message("Delete ids=%s", ids)
+        return self.db.delete(ids)
 
-    def upsert(
-        self,
-        documents: list[VectorDocument],
-        batch_size: int | None = None,
-    ) -> list[VectorDocument]:
-        """
-        Insert or update documents (create if not exists, update if exists).
-
-        Args:
-            documents: List of VectorDocument instances to upsert
-            batch_size: Number of documents per batch (optional)
+    def count(self) -> int:
+        """Count total documents in the collection.
 
         Returns:
-            List of successfully upserted VectorDocument instances
+            Total number of documents
+        """
+        return self.db.count()
+
+    def get_or_create(
+        self,
+        doc: Optional[Doc] = None,
+        *,
+        text: str | None = None,
+        vector: List[float] | None = None,
+        metadata: Dict[str, Any] | None = None,
+        defaults: Dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> tuple[VectorDocument, bool]:
+        """Get existing document or create new one (Django-style pattern).
+
+        Attempts to retrieve a document by explicit ID or metadata filter.
+        If not found, creates a new document with optional default values.
+        Avoids embedding generation during lookup to reduce costs.
+
+        Resolution Strategy:
+            1. If explicit ID provided → try direct get by ID
+            2. If metadata provided → search by metadata (no vector)
+            3. If not found → create with defaults applied
+
+        Args:
+            doc: Document input (str | dict | VectorDocument | None)
+            text: Optional text content
+            vector: Optional vector (used only if creating)
+            metadata: Optional metadata for lookup/creation
+            defaults: Additional fields applied only when creating
+            **kwargs: Extra metadata or id/_id/pk fields
+
+        Returns:
+            Tuple of (document, created) where created is True if new document
+        Raises:
+            MismatchError: If provided text mismatches existing text for same ID
 
         Examples:
-            # Prepare documents with embeddings
-            docs = [
-                VectorDocument(text="Hello", vector=embedding1),
-                VectorDocument(text="World", vector=embedding2)
-            ]
-            result = engine.upsert(docs)
+            >>> doc, created = engine.get_or_create("Hello", source="api")
+            >>> doc, created = engine.get_or_create({"id": "doc123", "text": "Hello"})
+            >>> doc, created = engine.get_or_create(
+            ...     text="Hello",
+            ...     metadata={"lang": "en"},
+            ...     defaults={"priority": "high"}
+            ... )
         """
-        log.info(f"Upserting {len(documents)} document(s)")
-        return self.db_adapter.upsert(documents, batch_size=batch_size)
+        # 1. Detect whether user explicitly provided an id before normalization
+        explicit_id: str | None = None
+        if isinstance(doc, VectorDocument) and doc.id:
+            explicit_id = doc.id
+        elif isinstance(doc, dict):
+            explicit_id = extract_pk(None, **doc)
+        elif isinstance(doc, (str, type(None))):
+            explicit_id = extract_pk(None, **kwargs)
 
-    def bulk_create(
+        # 2. Only attempt direct get if id was explicitly supplied (avoid using auto-generated id)
+        if explicit_id:
+            try:
+                existing = self.get(str(explicit_id))
+                return existing, False
+            except ValueError:
+                pass
+
+        # 3. Normalize using helper (may auto-generate id) without embedding generation
+        doc = self._doc_rebuild(doc, text=text, vector=vector, metadata=metadata, **kwargs)
+
+        # 4. Search fallback by metadata only (no vector cost)
+        if doc.metadata:
+            # Query by metadata filter only (no vector embedding needed)
+            results = self.db.search(vector=None, limit=1, where=doc.metadata)
+
+            if results:
+                existing = results[0]
+                # Validate text consistency if provided
+                if doc.text and existing.text and doc.text != existing.text:
+                    raise MismatchError(
+                        "Text content mismatch in get_or_create",
+                        provided_text=doc.text,
+                        existing_text=existing.text,
+                        document_id=existing.id,
+                    )
+                return existing, False
+
+        # 5. Creation path: apply defaults via copy_with
+        if defaults:
+            doc = doc.copy_with(**defaults)
+
+        return self.create(doc), True
+
+    def update_or_create(
         self,
-        documents: list[VectorDocument],
-        ignore_conflicts: bool = False,
-        update_conflicts: bool = False,
-    ) -> list[VectorDocument]:
-        """
-        Bulk create documents with conflict handling.
+        doc: Optional[Doc] = None,
+        *,
+        text: str | None = None,
+        vector: List[float] | None = None,
+        metadata: Dict[str, Any] | None = None,
+        defaults: Dict[str, Any] | None = None,
+        create_defaults: Dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> tuple[VectorDocument, bool]:
+        """Update existing document or create new one (Django-style pattern).
+
+        Attempts to update a document by ID. If not found, creates a new document.
+        Supports separate defaults for both paths and create-only defaults.
 
         Args:
-            documents: List of VectorDocument instances to create
-            ignore_conflicts: If True, skip documents with conflicting pk
-            update_conflicts: If True, update existing documents on conflict
+            doc: Document input (must include id field)
+            text: Optional text content
+            vector: Optional vector embedding
+            metadata: Optional metadata dict
+            defaults: Fields applied to both update and create paths
+            create_defaults: Fields applied only when creating (not updating)
+            **kwargs: Additional metadata fields
 
         Returns:
-            List of successfully created VectorDocument instances
+            Tuple of (document, created) where created is False for update, True for create
 
         Raises:
-            ValueError: If conflict occurs and both flags are False
+            MissingFieldError: If no ID provided in doc or kwargs
 
         Examples:
-            docs = [VectorDocument(text="Doc1", vector=v1), ...]
-            result = engine.bulk_create(docs, ignore_conflicts=True)
+            >>> doc, created = engine.update_or_create(
+            ...     {"id": "doc123", "text": "Updated"},
+            ...     defaults={"updated_at": "2024-01-01"}
+            ... )
+            >>> doc, created = engine.update_or_create(
+            ...     {"id": "doc456", "text": "New"},
+            ...     create_defaults={"created_at": "2024-01-01"}
+            ... )
         """
-        log.info(f"Bulk creating {len(documents)} document(s)")
-        return self.db_adapter.bulk_create(
-            documents,
+        # Normalize using helper
+        doc = self._doc_rebuild(doc, text=text, vector=vector, metadata=metadata, **kwargs)
+
+        if doc.id is None:
+            raise MissingFieldError("Cannot update_or_create without id", field="id", operation="update_or_create")
+
+        # Try update path
+        try:
+            if defaults:
+                doc = doc.copy_with(**defaults)
+            return self.update(doc), False
+        except CrossVectorError:
+            pass
+
+        # Create path: merge defaults + create_defaults
+        if defaults or create_defaults:
+            merged: Dict[str, Any] = {}
+            if defaults:
+                merged.update(defaults)
+            if create_defaults:
+                merged.update(create_defaults)
+            doc = doc.copy_with(**merged)
+
+        return self.create(doc), True
+
+    # ------------------------------------------------------------------
+    # Batch operations
+    # ------------------------------------------------------------------
+    def bulk_create(
+        self,
+        docs: List[Doc],
+        ignore_conflicts: bool = False,
+        update_conflicts: bool = False,
+    ) -> List[VectorDocument]:
+        """Create multiple documents in batch with optimized embedding generation.
+
+        Normalizes all inputs and generates embeddings in a single batch call
+        for better performance. Supports conflict handling strategies.
+
+        Args:
+            docs: List of documents (str | dict | VectorDocument)
+            ignore_conflicts: If True, skip documents with conflicting IDs
+            update_conflicts: If True, update existing documents on ID conflict
+
+        Returns:
+            List of created VectorDocuments
+
+        Examples:
+            >>> engine.bulk_create(["Hello", "World", "Test"])
+            >>> engine.bulk_create([
+            ...     {"id": "doc1", "text": "First"},
+            ...     {"id": "doc2", "text": "Second"}
+            ... ])
+        """
+        prepared = self._doc_prepare_many(docs)
+        self.logger.message("Bulk create count=%d", len(prepared))
+        return self.db.bulk_create(
+            prepared,
             ignore_conflicts=ignore_conflicts,
             update_conflicts=update_conflicts,
         )
 
     def bulk_update(
         self,
-        documents: list[VectorDocument],
+        docs: List[Doc],
         batch_size: int | None = None,
         ignore_conflicts: bool = False,
-    ) -> list[VectorDocument]:
-        """
-        Bulk update existing documents.
+    ) -> List[VectorDocument]:
+        """Update multiple existing documents in batch.
+
+        Updates documents by ID with automatic embedding regeneration for
+        changed text. All documents must have explicit IDs.
 
         Args:
-            documents: List of VectorDocument instances to update
-            batch_size: Number of documents per batch (optional)
-            ignore_conflicts: If True, skip non-existent documents
+            docs: List of documents to update (each must include id)
+            batch_size: Optional batch size for chunked updates
+            ignore_conflicts: If True, skip documents that don't exist
 
         Returns:
-            List of successfully updated VectorDocument instances
+            List of updated VectorDocuments
 
         Raises:
-            ValueError: If any document doesn't exist and ignore_conflicts=False
+            ValueError: If any document lacks an ID (when ignore_conflicts=False)
 
         Examples:
-            docs = [VectorDocument(pk="id1", text="Updated", vector=v1), ...]
-            result = engine.bulk_update(docs, batch_size=100)
+            >>> engine.bulk_update([
+            ...     {"id": "doc1", "text": "Updated first"},
+            ...     {"id": "doc2", "text": "Updated second"}
+            ... ])
         """
-        log.info(f"Bulk updating {len(documents)} document(s)")
-        return self.db_adapter.bulk_update(
-            documents,
+        prepared = self._doc_prepare_many(docs)
+        self.logger.message("Bulk update count=%d", len(prepared))
+        return self.db.bulk_update(
+            prepared,
             batch_size=batch_size,
             ignore_conflicts=ignore_conflicts,
         )
 
-    def get_collection(self, collection_name: str | None = None) -> Any:
-        """
-        Get an existing collection object.
+    def upsert(self, docs: list[Doc], batch_size: int | None = None) -> list[VectorDocument]:
+        """Insert or update multiple documents in batch (upsert operation).
+
+        Creates new documents or updates existing ones based on ID presence.
+        Optimizes embedding generation with single batch call.
 
         Args:
-            collection_name: Name of the collection (default: current collection)
+            docs: List of documents (str | dict | VectorDocument)
+            batch_size: Optional batch size for chunked operations
 
         Returns:
-            Collection object (type depends on database adapter)
-
-        Raises:
-            ValueError: If collection doesn't exist
+            List of upserted VectorDocuments
 
         Examples:
-            # Get current collection
-            collection = engine.get_collection()
-
-            # Get specific collection
-            collection = engine.get_collection("my_collection")
+            >>> engine.upsert([
+            ...     {"id": "doc1", "text": "First"},
+            ...     {"id": "doc2", "text": "Second"}
+            ... ])
         """
-        name = collection_name or self.collection_name
-        return self.db_adapter.get_collection(name)
+        prepared = self._doc_prepare_many(docs)
+        self.logger.message("Upsert count=%d", len(prepared))
+        return self.db.upsert(prepared, batch_size=batch_size)
 
-    def add_collection(
+    # ------------------------------------------------------------------
+    # Search and query operations
+    # ------------------------------------------------------------------
+    def search(
         self,
-        collection_name: str,
-        dimension: int,
-        metric: str = "cosine",
-    ) -> None:
-        """
-        Create a new collection.
+        query: Union[str, List[float], None] = None,
+        limit: int | None = None,
+        offset: int = 0,
+        where: Dict[str, Any] | None = None,
+        fields: Set[str] | None = None,
+    ) -> List[VectorDocument]:
+        """Search for similar documents by text query or vector.
+
+        Performs semantic search using vector similarity. Automatically generates
+        embeddings for text queries. Supports metadata filtering and field projection.
 
         Args:
-            collection_name: Name of the collection to create
-            dimension: Vector dimension
-            metric: Distance metric (cosine, euclidean, dot_product)
+            query: Search query (str for text, List[float] for vector, None for metadata-only)
+            limit: Maximum number of results (default from settings)
+            offset: Number of results to skip
+            where: Metadata filter conditions (dict)
+            fields: Set of fields to include in results
 
-        Raises:
-            ValueError: If collection already exists
+        Returns:
+            List of matching VectorDocuments, ordered by similarity
 
         Examples:
-            engine.add_collection("my_collection", dimension=1536)
+            >>> results = engine.search("machine learning", limit=5)
+            >>> results = engine.search(
+            ...     "AI trends",
+            ...     where={"category": "tech", "year": 2024}
+            ... )
+            >>> results = engine.search(where={"status": "active"})  # metadata-only
         """
-        log.info(f"Creating collection: {collection_name}")
-        self.db_adapter.add_collection(collection_name, dimension, metric)
+        vector = None
+        if isinstance(query, str):
+            vector = self.embedding.get_embeddings([query])[0]
+        elif isinstance(query, list):
+            vector = query
+        # If query is None, do metadata-only search
 
-    def get_or_create_collection(
-        self,
-        collection_name: str,
-        dimension: int,
-        metric: str = "cosine",
-    ) -> Any:
+        # Use default limit from settings if not provided
+        if limit is None:
+            limit = settings.VECTOR_SEARCH_LIMIT
+
+        return self.db.search(vector=vector, limit=limit, offset=offset, where=where, fields=fields)
+
+    # ------------------------------------------------------------------
+    # Collection management operations
+    # ------------------------------------------------------------------
+    def get_collection(self, collection_name: str | None = None) -> Any:
+        """Get a collection by name.
+
+        Args:
+            collection_name: Name of collection (defaults to engine's active collection)
+
+        Returns:
+            Collection object (adapter-specific type)
         """
-        Get existing collection or create if it doesn't exist.
+        return self.db.get_collection(collection_name or self.collection_name)
+
+    def add_collection(self, collection_name: str, dimension: int, metric: str = "cosine") -> None:
+        """Create a new collection with specified configuration.
+
+        Args:
+            collection_name: Name for the new collection
+            dimension: Vector dimension size
+            metric: Distance metric ("cosine", "euclidean", or "dot_product")
+        """
+        self.logger.message("Add collection name=%s dimension=%d metric=%s", collection_name, dimension, metric)
+        self.db.add_collection(collection_name, dimension, metric)
+
+    def get_or_create_collection(self, collection_name: str, dimension: int, metric: str = "cosine") -> Any:
+        """Get existing collection or create if it doesn't exist.
 
         Args:
             collection_name: Name of the collection
@@ -331,189 +652,6 @@ class VectorEngine:
             metric: Distance metric (used if creating)
 
         Returns:
-            Collection object (type depends on database adapter)
-
-        Examples:
-            collection = engine.get_or_create_collection("my_collection", 1536)
+            Collection object (adapter-specific type)
         """
-        return self.db_adapter.get_or_create_collection(
-            collection_name,
-            dimension,
-            metric,
-        )
-
-    # Helper methods for flexible input handling with auto-embedding
-
-    def create_from_texts(
-        self,
-        texts: Union[str, List[str]],
-        metadatas: Union[Dict[str, Any], List[Dict[str, Any]], None] = None,
-        pks: Union[str, List[str], None] = None,
-        ignore_conflicts: bool = False,
-        update_conflicts: bool = False,
-    ) -> list[VectorDocument]:
-        """
-        Create documents from raw text(s) with automatic embedding generation.
-
-        Args:
-            texts: Single text string or list of text strings
-            metadatas: Single metadata dict or list of metadata dicts (optional)
-            pks: Single pk or list of pks (optional, auto-generated if not provided)
-            ignore_conflicts: Skip conflicting documents
-            update_conflicts: Update existing documents on conflict
-
-        Returns:
-            List of successfully created VectorDocument instances
-
-        Examples:
-            # Single text
-            docs = engine.create_from_texts("Hello world")
-            docs = engine.create_from_texts("Hello", metadatas={"source": "test"})
-
-            # Multiple texts
-            docs = engine.create_from_texts(
-                ["Text 1", "Text 2"],
-                metadatas=[{"id": 1}, {"id": 2}]
-            )
-        """
-        # Normalize inputs using utils
-        text_list = normalize_texts(texts)
-        metadata_list = normalize_metadatas(metadatas, len(text_list))
-        pk_list = normalize_pks(pks, len(text_list))
-
-        # Generate embeddings
-        log.info(f"Generating embeddings for {len(text_list)} text(s)")
-        embeddings = self.embedding_adapter.get_embeddings(text_list)
-
-        # Create documents
-        vector_docs = []
-        for i, text in enumerate(text_list):
-            doc = VectorDocument(
-                id=pk_list[i] if i < len(pk_list) else None,
-                text=text,
-                vector=embeddings[i],
-                metadata=metadata_list[i] if i < len(metadata_list) else {},
-            )
-            vector_docs.append(doc)
-
-        # Bulk create
-        return self.bulk_create(
-            vector_docs,
-            ignore_conflicts=ignore_conflicts,
-            update_conflicts=update_conflicts,
-        )
-
-    def upsert_from_texts(
-        self,
-        texts: Union[str, List[str]],
-        metadatas: Union[Dict[str, Any], List[Dict[str, Any]], None] = None,
-        pks: Union[str, List[str], None] = None,
-        batch_size: int | None = None,
-    ) -> list[VectorDocument]:
-        """
-        Upsert documents from raw text(s) with automatic embedding generation.
-
-        Args:
-            texts: Single text string or list of text strings
-            metadatas: Single metadata dict or list of metadata dicts (optional)
-            pks: Single pk or list of pks (optional, auto-generated if not provided)
-            batch_size: Number of documents per batch (optional)
-
-        Returns:
-            List of successfully upserted VectorDocument instances
-
-        Examples:
-            # Single text
-            docs = engine.upsert_from_texts("Hello world", pks="doc1")
-
-            # Multiple texts
-            docs = engine.upsert_from_texts(
-                ["Text 1", "Text 2"],
-                pks=["doc1", "doc2"],
-                metadatas=[{"v": 1}, {"v": 2}]
-            )
-        """
-        # Normalize inputs using utils
-        text_list = normalize_texts(texts)
-        metadata_list = normalize_metadatas(metadatas, len(text_list))
-        pk_list = normalize_pks(pks, len(text_list))
-
-        # Generate embeddings
-        log.info(f"Generating embeddings for {len(text_list)} text(s)")
-        embeddings = self.embedding_adapter.get_embeddings(text_list)
-
-        # Create documents
-        vector_docs = []
-        for i, text in enumerate(text_list):
-            doc = VectorDocument(
-                id=pk_list[i] if i < len(pk_list) else None,
-                text=text,
-                vector=embeddings[i],
-                metadata=metadata_list[i] if i < len(metadata_list) else {},
-            )
-            vector_docs.append(doc)
-
-        # Upsert
-        return self.upsert(vector_docs, batch_size=batch_size)
-
-    def update_from_texts(
-        self,
-        pks: Union[str, List[str]],
-        texts: Union[str, List[str]],
-        metadatas: Union[Dict[str, Any], List[Dict[str, Any]], None] = None,
-        batch_size: int | None = None,
-        ignore_conflicts: bool = False,
-    ) -> list[VectorDocument]:
-        """
-        Update existing documents from raw text(s) with automatic embedding generation.
-
-        Args:
-            pks: Single pk or list of pks (required for updates)
-            texts: Single text string or list of text strings
-            metadatas: Single metadata dict or list of metadata dicts (optional)
-            batch_size: Number of documents per batch (optional)
-            ignore_conflicts: Skip non-existent documents
-
-        Returns:
-            List of successfully updated VectorDocument instances
-
-        Raises:
-            ValueError: If any document doesn't exist and ignore_conflicts=False
-
-        Examples:
-            # Single document
-            docs = engine.update_from_texts("doc1", "Updated text")
-
-            # Multiple documents
-            docs = engine.update_from_texts(
-                ["doc1", "doc2"],
-                ["Text 1", "Text 2"],
-                metadatas=[{"v": 2}, {"v": 2}]
-            )
-        """
-        # Normalize inputs using utils
-        pk_list = normalize_pks(pks, 1 if isinstance(pks, (str, int)) else len(pks))  # type: ignore
-        text_list = normalize_texts(texts)
-        metadata_list = normalize_metadatas(metadatas, len(text_list))
-
-        # Generate embeddings
-        log.info(f"Generating embeddings for {len(text_list)} text(s)")
-        embeddings = self.embedding_adapter.get_embeddings(text_list)
-
-        # Create documents
-        vector_docs = []
-        for i, text in enumerate(text_list):
-            doc = VectorDocument(
-                id=pk_list[i],
-                text=text,
-                vector=embeddings[i],
-                metadata=metadata_list[i] if i < len(metadata_list) else {},
-            )
-            vector_docs.append(doc)
-
-        # Bulk update
-        return self.bulk_update(
-            vector_docs,
-            batch_size=batch_size,
-            ignore_conflicts=ignore_conflicts,
-        )
+        return self.db.get_or_create_collection(collection_name, dimension, metric)

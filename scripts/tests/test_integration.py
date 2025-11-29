@@ -7,7 +7,7 @@ import time
 
 from dotenv import load_dotenv
 
-from crossvector import VectorDocument, VectorEngine
+from crossvector import VectorEngine
 from crossvector.dbs.astradb import AstraDBAdapter
 from crossvector.dbs.chroma import ChromaDBAdapter
 from crossvector.dbs.milvus import MilvusDBAdapter
@@ -32,13 +32,13 @@ test_metadatas = [
 test_pks = ["doc1", "doc2", "doc3"]
 
 
-def test_engine(db_name: str, db_adapter, embedding_adapter, collection_name: str):
+def test_engine(db_name: str, db, embedding, collection_name: str):
     """Test VectorEngine with a specific database adapter."""
     print(f"\n{'=' * 80}")
-    print(f"Testing {db_name} with {embedding_adapter.model_name}")
+    print(f"Testing {db_name} with {embedding.model_name}")
     print(f"{'=' * 80}")
 
-    engine = VectorEngine(embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name=collection_name)
+    engine = VectorEngine(embedding=embedding, db=db, collection_name=collection_name)
 
     # Clean up existing data (if collection exists, drop it)
     try:
@@ -49,11 +49,12 @@ def test_engine(db_name: str, db_adapter, embedding_adapter, collection_name: st
         print(f"Note: Could not drop collection (may not exist): {e}")
 
     # Re-initialize after dropping
-    engine = VectorEngine(embedding_adapter=embedding_adapter, db_adapter=db_adapter, collection_name=collection_name)
+    engine = VectorEngine(embedding=embedding, db=db, collection_name=collection_name)
 
-    # Test 1: Upsert VectorDocuments from texts (with auto-embedding)
-    print("\n1. Testing upsert_from_texts...")
-    result = engine.upsert_from_texts(texts=test_texts, metadatas=test_metadatas, pks=test_pks)
+    # Test 1: Upsert VectorDocuments (with auto-embedding)
+    print("\n1. Testing upsert...")
+    docs = [{"id": test_pks[i], "text": test_texts[i], "metadata": test_metadatas[i]} for i in range(len(test_texts))]
+    result = engine.upsert(docs)
     print(f"Inserted {len(result)} VectorDocuments")
 
     # Test 2: Count VectorDocuments

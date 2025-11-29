@@ -12,24 +12,35 @@ Key Features:
     - Automatic index creation and management
 """
 
-import logging
-import os
-from typing import Any, Dict, List, Sequence, Set, Tuple, Union
+from typing import Any, Dict, List, Set
 
 from pymilvus import DataType, MilvusClient
 
 from crossvector.abc import VectorDBAdapter
 from crossvector.constants import VECTOR_METRIC_MAP, VectorMetric
+from crossvector.exceptions import (
+    CollectionExistsError,
+    CollectionNotFoundError,
+    CollectionNotInitializedError,
+    DocumentExistsError,
+    DocumentNotFoundError,
+    DoesNotExist,
+    InvalidFieldError,
+    MissingConfigError,
+    MissingDocumentError,
+    MissingFieldError,
+    MultipleObjectsReturned,
+    SearchError,
+)
 from crossvector.schema import VectorDocument
 from crossvector.settings import settings as api_settings
+from crossvector.types import DocIds
 from crossvector.utils import (
     apply_update_fields,
-    extract_id,
+    extract_pk,
     normalize_pks,
     prepare_item_for_storage,
 )
-
-log = logging.getLogger(__name__)
 
 
 class MilvusDBAdapter(VectorDBAdapter):
@@ -53,10 +64,10 @@ class MilvusDBAdapter(VectorDBAdapter):
         Args:
             **kwargs: Additional configuration options (currently unused)
         """
+        super(MilvusDBAdapter, self).__init__(**kwargs)
         self._client: MilvusClient | None = None
         self.collection_name: str | None = None
         self.embedding_dimension: int | None = None
-        log.info("MilvusDBAdapter initialized.")
 
     @property
     def client(self) -> MilvusClient:
@@ -69,16 +80,20 @@ class MilvusDBAdapter(VectorDBAdapter):
             ValueError: If MILVUS_API_ENDPOINT is not configured
         """
         if self._client is None:
-            uri = os.getenv("MILVUS_API_ENDPOINT")
+            uri = api_settings.MILVUS_API_ENDPOINT
             if not uri:
-                raise ValueError("MILVUS_API_ENDPOINT is not set. Please configure it in your .env file.")
-            user = os.getenv("MILVUS_USER")
-            password = os.getenv("MILVUS_PASSWORD")
+                raise MissingConfigError(
+                    "MILVUS_API_ENDPOINT is not set. Please configure it in your .env file.",
+                    config_key="MILVUS_API_ENDPOINT",
+                    env_file=".env",
+                )
+            user = api_settings.MILVUS_USER
+            password = api_settings.MILVUS_PASSWORD
             token = None
             if user and password:
                 token = f"{user}:{password}"
             self._client = MilvusClient(uri=uri, token=token)
-            log.info(f"MilvusClient initialized with uri={uri}")
+            self.logger.message(f"MilvusClient initialized with uri={uri}")
         return self._client
 
     # ------------------------------------------------------------------
@@ -104,9 +119,9 @@ class MilvusDBAdapter(VectorDBAdapter):
         """
         self.store_text = store_text if store_text is not None else api_settings.VECTOR_STORE_TEXT
         if metric is None:
-            metric = os.getenv("VECTOR_METRIC", VectorMetric.COSINE)
+            metric = api_settings.VECTOR_METRIC or VectorMetric.COSINE
         self.get_or_create_collection(collection_name, embedding_dimension, metric)
-        log.info(
+        self.logger.message(
             f"Milvus initialized: collection='{collection_name}', "
             f"dimension={embedding_dimension}, metric={metric}, store_text={self.store_text}"
         )
@@ -196,11 +211,11 @@ class MilvusDBAdapter(VectorDBAdapter):
             metric: Distance metric for vector search
 
         Raises:
-            ValueError: If collection already exists
+            CollectionExistsError: If collection already exists
         """
         info = self._get_collection_info(collection_name)
         if info:
-            raise ValueError(f"Collection '{collection_name}' already exists.")
+            raise CollectionExistsError("Collection already exists", collection_name=collection_name)
 
         self.collection_name = collection_name
         self.embedding_dimension = embedding_dimension
@@ -212,7 +227,7 @@ class MilvusDBAdapter(VectorDBAdapter):
         self.client.create_collection(collection_name=collection_name, schema=schema)
         index_params = self._build_index_params(embedding_dimension, metric_key)
         self.client.create_index(collection_name=collection_name, index_params=index_params)
-        log.info(f"Milvus collection '{collection_name}' created with schema and index.")
+        self.logger.message(f"Milvus collection '{collection_name}' created with schema and index.")
 
     def get_collection(self, collection_name: str) -> None:
         """Get an existing Milvus collection.
@@ -221,14 +236,14 @@ class MilvusDBAdapter(VectorDBAdapter):
             collection_name: Name of the collection to retrieve
 
         Raises:
-            ValueError: If collection doesn't exist
+            CollectionNotFoundError: If collection doesn't exist
         """
         info = self._get_collection_info(collection_name)
         if not info:
-            raise ValueError(f"Collection '{collection_name}' does not exist.")
+            raise CollectionNotFoundError("Collection does not exist", collection_name=collection_name)
 
         self.collection_name = collection_name
-        log.info(f"Milvus collection '{collection_name}' retrieved.")
+        self.logger.message(f"Milvus collection '{collection_name}' retrieved.")
 
     def get_or_create_collection(
         self, collection_name: str, embedding_dimension: int, metric: str = VectorMetric.COSINE
@@ -272,12 +287,12 @@ class MilvusDBAdapter(VectorDBAdapter):
             # Check if required fields exist
             if "id" not in field_names or "vector" not in field_names:
                 self.client.drop_collection(collection_name=collection_name)
-                log.info(f"Milvus collection '{collection_name}' dropped due to wrong schema.")
+                self.logger.message(f"Milvus collection '{collection_name}' dropped due to wrong schema.")
                 need_create = True
             elif self.store_text and "text" not in field_names:
                 # If we want to store text but the collection doesn't have it, recreate
                 self.client.drop_collection(collection_name=collection_name)
-                log.info(f"Milvus collection '{collection_name}' dropped to add 'text' field.")
+                self.logger.message(f"Milvus collection '{collection_name}' dropped to add 'text' field.")
                 need_create = True
             elif not has_vector_index:
                 # Index missing/wrong
@@ -294,10 +309,10 @@ class MilvusDBAdapter(VectorDBAdapter):
 
                 if (want_int64 and not is_int64) or ((not want_int64) and not is_varchar):
                     self.client.drop_collection(collection_name=collection_name)
-                    log.info("Milvus collection dropped to align PK type with PRIMARY_KEY_MODE.")
+                    self.logger.message("Milvus collection dropped to align PK type with PRIMARY_KEY_MODE.")
                     need_create = True
                 else:
-                    log.info(f"Milvus collection '{collection_name}' already exists with correct schema.")
+                    self.logger.message(f"Milvus collection '{collection_name}' already exists with correct schema.")
         else:
             need_create = True
 
@@ -306,7 +321,7 @@ class MilvusDBAdapter(VectorDBAdapter):
             self.client.create_collection(collection_name=collection_name, schema=schema)
             index_params = self._build_index_params(embedding_dimension, metric_key)
             self.client.create_index(collection_name=collection_name, index_params=index_params)
-            log.info(f"Milvus collection '{collection_name}' created with schema and index.")
+            self.logger.message(f"Milvus collection '{collection_name}' created with schema and index.")
 
     def drop_collection(self, collection_name: str) -> bool:
         """Drop the specified collection.
@@ -318,7 +333,7 @@ class MilvusDBAdapter(VectorDBAdapter):
             True if successful
         """
         self.client.drop_collection(collection_name=collection_name)
-        log.info(f"Milvus collection '{collection_name}' dropped.")
+        self.logger.message(f"Milvus collection '{collection_name}' dropped.")
         return True
 
     def clear_collection(self) -> int:
@@ -328,10 +343,12 @@ class MilvusDBAdapter(VectorDBAdapter):
             Number of documents deleted
 
         Raises:
-            ValueError: If collection_name is not set
+            CollectionNotInitializedError: If collection is not initialized
         """
         if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
+            raise CollectionNotInitializedError(
+                "Collection is not initialized", operation="clear_collection", adapter="Milvus"
+            )
 
         count = self.count()
         if count == 0:
@@ -344,7 +361,7 @@ class MilvusDBAdapter(VectorDBAdapter):
         else:
             self.client.delete(collection_name=self.collection_name, filter="id != ''")
 
-        log.info(f"Cleared {count} documents from collection.")
+        self.logger.message(f"Cleared {count} documents from collection.")
         return count
 
     def count(self) -> int:
@@ -354,10 +371,10 @@ class MilvusDBAdapter(VectorDBAdapter):
             Total document count
 
         Raises:
-            ValueError: If collection_name is not set
+            CollectionNotInitializedError: If collection is not initialized
         """
         if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="count", adapter="Milvus")
         info = self.client.describe_collection(collection_name=self.collection_name)
         return info.get("num_entities", 0)
 
@@ -367,8 +384,8 @@ class MilvusDBAdapter(VectorDBAdapter):
 
     def search(
         self,
-        vector: List[float],
-        limit: int,
+        vector: List[float] | None = None,
+        limit: int | None = None,
         offset: int = 0,
         where: Dict[str, Any] | None = None,
         fields: Set[str] | None = None,
@@ -386,10 +403,14 @@ class MilvusDBAdapter(VectorDBAdapter):
             List of VectorDocument instances ordered by similarity
 
         Raises:
-            ValueError: If collection_name is not set
+            CollectionNotInitializedError: If collection is not initialized
+            SearchError: If neither vector nor where filter provided
         """
         if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="search", adapter="Milvus")
+
+        if limit is None:
+            limit = api_settings.VECTOR_SEARCH_LIMIT
 
         self.client.load_collection(collection_name=self.collection_name)
 
@@ -407,6 +428,31 @@ class MilvusDBAdapter(VectorDBAdapter):
 
         # Milvus fetch with offset: get limit+offset
         fetch_limit = limit + offset
+
+        if vector is None:
+            # Metadata-only query using query API
+            if not filter_expr:
+                raise SearchError(
+                    "Either vector or where filter required for search", reason="both vector and where are missing"
+                )
+            results = self.client.query(
+                collection_name=self.collection_name,
+                filter=filter_expr,
+                output_fields=output_fields,
+                limit=fetch_limit,
+            )
+            # Apply offset
+            results = results[offset:] if results else []
+            vector_docs = []
+            for hit in results:
+                doc_dict = {"_id": hit.get("id"), "metadata": hit.get("metadata", {})}
+                if "text" in hit:
+                    doc_dict["text"] = hit["text"]
+                vector_docs.append(VectorDocument.from_kwargs(**doc_dict))
+            self.logger.message(f"Search returned {len(vector_docs)} results.")
+            return vector_docs
+
+        # Vector search path
         results = self.client.search(
             collection_name=self.collection_name,
             data=[vector],
@@ -426,72 +472,87 @@ class MilvusDBAdapter(VectorDBAdapter):
                 doc_dict["text"] = hit["text"]
             vector_docs.append(VectorDocument.from_kwargs(**doc_dict))
 
-        log.info(f"Vector search returned {len(vector_docs)} results.")
+        self.logger.message(f"Vector search returned {len(vector_docs)} results.")
         return vector_docs
 
     # ------------------------------------------------------------------
     # CRUD Operations
     # ------------------------------------------------------------------
 
-    def get(self, pk: Any = None, **kwargs) -> VectorDocument:
-        """Retrieve a single document by its ID.
+    def get(self, *args, **kwargs) -> VectorDocument:
+        """Retrieve a single document by its ID or metadata filter.
 
         Args:
-            pk: Primary key value (positional)
-            **kwargs: Alternative way to specify id via _id/id/pk keys
+            *args: Optional positional pk
+            **kwargs: Metadata fields for filtering (e.g., name="value", status="active")
+                     Special keys: pk/id/_id for direct lookup
 
         Returns:
             VectorDocument instance
 
         Raises:
-            ValueError: If collection_name not set or document ID missing/not found
+            CollectionNotInitializedError: If collection is not initialized
+            MissingFieldError: If neither pk nor metadata filters provided
+            DoesNotExist: If no document matches
+            MultipleObjectsReturned: If multiple documents match
         """
         if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="get", adapter="Milvus")
 
-        doc_id = pk or extract_id(kwargs)
-        if not doc_id:
-            raise ValueError("Document ID is required (provide pk or id/_id/pk in kwargs)")
+        pk = args[0] if args else None
+        doc_id = pk or extract_pk(None, **kwargs) if not pk else pk
 
-        results = self.client.get(collection_name=self.collection_name, ids=[doc_id])
+        # Priority 1: Direct pk lookup
+        if doc_id:
+            results = self.client.get(collection_name=self.collection_name, ids=[doc_id, doc_id])
+            if not results:
+                raise DoesNotExist(f"Document with ID '{doc_id}' not found")
+            if len(results) > 1:
+                raise MultipleObjectsReturned(f"Multiple documents found with ID '{doc_id}'")
+            return VectorDocument.from_kwargs(**results[0])
+
+        # Priority 2: Search by metadata kwargs using search method
+        metadata_kwargs = {k: v for k, v in kwargs.items() if k not in ("pk", "id", "_id")}
+        if not metadata_kwargs:
+            raise MissingFieldError(
+                "Either pk/id/_id or metadata filter kwargs required", field="id or filter", operation="get"
+            )
+
+        results = self.search(vector=None, where=metadata_kwargs, limit=2)
         if not results:
-            raise ValueError(f"Document with ID '{doc_id}' not found")
+            raise DoesNotExist("No document found matching metadata filter")
+        if len(results) > 1:
+            raise MultipleObjectsReturned("Multiple documents found matching metadata filter")
+        return results[0]
 
-        return VectorDocument.from_kwargs(**results[0])
-
-    def create(self, **kwargs: Any) -> VectorDocument:
+    def create(self, doc: VectorDocument) -> VectorDocument:
         """Create and persist a single document.
 
-        Expected kwargs:
-            vector/$vector: List[float] - Vector embedding (required)
-            text: str - Original text content (optional)
-            metadata: dict - Additional metadata (optional)
-            id/_id/pk: str - Explicit document ID (optional, auto-generated if missing)
-
         Args:
-            **kwargs: Document fields as keyword arguments
+            doc: VectorDocument instance to create
 
         Returns:
             Created VectorDocument instance
 
         Raises:
-            ValueError: If collection not set, vector missing, or document ID conflicts
+            CollectionNotInitializedError: If collection is not initialized
+            InvalidFieldError: If vector missing
+            DocumentExistsError: If document ID conflicts
         """
         if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="create", adapter="Milvus")
 
-        doc = VectorDocument.from_kwargs(**kwargs)
         item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
 
         pk = doc.pk
         vector = item.get("vector")
         if vector is None:
-            raise ValueError("Vector required for create in Milvus.")
+            raise InvalidFieldError("Vector is required", field="vector", operation="create")
 
         # Conflict check
         existing = self.client.get(collection_name=self.collection_name, ids=[pk])
         if existing:
-            raise ValueError(f"Conflict: document with id '{pk}' already exists.")
+            raise DocumentExistsError("Document already exists", document_id=pk)
 
         text_val = item.get("text") if self.store_text else None
         if text_val and len(text_val) > 65535:
@@ -505,66 +566,42 @@ class MilvusDBAdapter(VectorDBAdapter):
             data["text"] = text_val
 
         self.client.upsert(collection_name=self.collection_name, data=[data])
-        log.info(f"Created document with id '{pk}'.")
+        self.logger.message(f"Created document with id '{pk}'.")
         return doc
 
-    def get_or_create(self, defaults: Dict[str, Any] | None = None, **kwargs) -> Tuple[VectorDocument, bool]:
-        """Get a document by ID or create it if not found.
-
-        Args:
-            defaults: Default values to use when creating new document
-            **kwargs: Lookup fields and values (must include id/_id/pk)
-
-        Returns:
-            Tuple of (document, created) where created is True if new document was created
-
-        Raises:
-            ValueError: If collection_name is not set
-        """
-        if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
-
-        lookup_id = extract_id(kwargs)
-        if lookup_id:
-            try:
-                found = self.get(lookup_id)
-                return found, False
-            except ValueError:
-                pass
-
-        # Create new document with merged defaults
-        merged = {**(defaults or {}), **kwargs}
-        new_doc = self.create(**merged)
-        return new_doc, True
-
-    def update(self, **kwargs) -> VectorDocument:
+    def update(self, doc: VectorDocument, **kwargs) -> VectorDocument:
         """Update a single document by ID.
 
         Strict update semantics: raises error if document doesn't exist.
 
         Args:
-            **kwargs: Must include id/_id/pk, plus fields to update
+            doc: VectorDocument to update (must include id/pk)
 
         Returns:
             Updated VectorDocument instance
 
         Raises:
-            ValueError: If collection not set, ID missing, or document not found
+            CollectionNotInitializedError: If collection is not initialized
+            MissingFieldError: If ID missing
+            DocumentNotFoundError: If document not found
         """
         if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="update", adapter="Milvus")
 
-        id_val = extract_id(kwargs)
-        if not id_val:
-            raise ValueError("'id', '_id', or 'pk' is required for update")
+        pk = doc.id or extract_pk(None, **kwargs)
+        if not pk:
+            raise MissingFieldError("'id', '_id', or 'pk' is required for update", field="id", operation="update")
 
         # Get existing document
-        existing = self.client.get(collection_name=self.collection_name, ids=[id_val])
+        existing = self.client.get(collection_name=self.collection_name, ids=[pk])
         if not existing:
-            raise ValueError(f"Document with ID '{id_val}' not found")
+            raise DocumentNotFoundError("Document not found", document_id=pk, operation="update")
 
         existing_doc = existing[0]
-        prepared = prepare_item_for_storage(kwargs, store_text=self.store_text)
+        prepared = prepare_item_for_storage(
+            doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector),
+            store_text=self.store_text,
+        )
 
         # Build replacement doc using existing + updates
         vector = prepared.get("$vector") or prepared.get("vector") or existing_doc.get("vector")
@@ -579,50 +616,18 @@ class MilvusDBAdapter(VectorDBAdapter):
             if k not in ("_id", "$vector", "text"):
                 metadata[k] = v
 
-        data: Dict[str, Any] = {"id": id_val, "vector": vector, "metadata": metadata}
+        data: Dict[str, Any] = {"id": pk, "vector": vector, "metadata": metadata}
         if self.store_text:
             data["text"] = text_val
 
         self.client.upsert(collection_name=self.collection_name, data=[data])
-        log.info(f"Updated document with id '{id_val}'.")
+        self.logger.message(f"Updated document with id '{pk}'.")
 
         # Return refreshed document
-        refreshed = self.client.get(collection_name=self.collection_name, ids=[id_val])
+        refreshed = self.client.get(collection_name=self.collection_name, ids=[pk])
         return VectorDocument.from_kwargs(**refreshed[0])
 
-    def update_or_create(
-        self, defaults: Dict[str, Any] | None = None, create_defaults: Dict[str, Any] | None = None, **kwargs
-    ) -> Tuple[VectorDocument, bool]:
-        """Update document if exists, otherwise create with merged defaults.
-
-        Args:
-            defaults: Default values for both update and create
-            create_defaults: Default values used only when creating (overrides defaults)
-            **kwargs: Fields to update or use for creation
-
-        Returns:
-            Tuple of (document, created) where created is True if new document was created
-
-        Raises:
-            ValueError: If collection_name is not set
-        """
-        if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
-
-        lookup_id = extract_id(kwargs)
-        if lookup_id:
-            try:
-                updated = self.update(**kwargs)
-                return updated, False
-            except ValueError:
-                pass
-
-        # Create new document
-        merged = {**(create_defaults or defaults or {}), **kwargs}
-        new_doc = self.create(**merged)
-        return new_doc, True
-
-    def delete(self, ids: Union[str, Sequence[str]]) -> int:
+    def delete(self, ids: DocIds) -> int:
         """Delete document(s) by ID.
 
         Args:
@@ -632,17 +637,17 @@ class MilvusDBAdapter(VectorDBAdapter):
             Number of documents deleted
 
         Raises:
-            ValueError: If collection_name is not set
+            CollectionNotInitializedError: If collection is not initialized
         """
         if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="delete", adapter="Milvus")
 
         pks = normalize_pks(ids)
         if not pks:
             return 0
 
         self.client.delete(collection_name=self.collection_name, ids=pks)
-        log.info(f"Deleted {len(pks)} document(s).")
+        self.logger.message(f"Deleted {len(pks)} document(s).")
         return len(pks)
 
     # ------------------------------------------------------------------
@@ -651,7 +656,7 @@ class MilvusDBAdapter(VectorDBAdapter):
 
     def bulk_create(
         self,
-        documents: List[VectorDocument],
+        docs: List[VectorDocument],
         batch_size: int = None,
         ignore_conflicts: bool = False,
         update_conflicts: bool = False,
@@ -660,7 +665,7 @@ class MilvusDBAdapter(VectorDBAdapter):
         """Bulk create multiple documents.
 
         Args:
-            documents: List of VectorDocument instances to create
+            docs: List of VectorDocument instances to create
             batch_size: Number of documents per batch (optional)
             ignore_conflicts: If True, skip conflicting documents
             update_conflicts: If True, update conflicting documents
@@ -670,17 +675,21 @@ class MilvusDBAdapter(VectorDBAdapter):
             List of successfully created VectorDocument instances
 
         Raises:
-            ValueError: If collection not set, vector missing, or conflict occurs
+            CollectionNotInitializedError: If collection is not initialized
+            InvalidFieldError: If vector missing
+            DocumentExistsError: If conflict occurs and ignore_conflicts/update_conflicts False
         """
         if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
-        if not documents:
+            raise CollectionNotInitializedError(
+                "Collection is not initialized", operation="bulk_create", adapter="Milvus"
+            )
+        if not docs:
             return []
 
         dataset: List[Dict[str, Any]] = []
         created_docs: List[VectorDocument] = []
 
-        for doc in documents:
+        for doc in docs:
             item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
             pk = doc.pk
 
@@ -706,11 +715,11 @@ class MilvusDBAdapter(VectorDBAdapter):
                         data["text"] = text_val
                     self.client.upsert(collection_name=self.collection_name, data=[data])
                     continue
-                raise ValueError(f"Conflict on id '{pk}' during bulk_create.")
+                raise DocumentExistsError("Document already exists", document_id=pk, operation="bulk_create")
 
             vector = item.get("vector")
             if vector is None:
-                raise ValueError("Vector required for bulk_create in Milvus.")
+                raise InvalidFieldError("Vector is required", field="vector", operation="bulk_create")
 
             data: Dict[str, Any] = {"id": pk, "vector": vector}
             if self.store_text and "text" in item:
@@ -732,12 +741,12 @@ class MilvusDBAdapter(VectorDBAdapter):
             else:
                 self.client.upsert(collection_name=self.collection_name, data=dataset)
 
-        log.info(f"Bulk created {len(created_docs)} document(s).")
+        self.logger.message(f"Bulk created {len(created_docs)} document(s).")
         return created_docs
 
     def bulk_update(
         self,
-        documents: List[VectorDocument],
+        docs: List[VectorDocument],
         batch_size: int = None,
         ignore_conflicts: bool = False,
         update_fields: List[str] = None,
@@ -745,7 +754,7 @@ class MilvusDBAdapter(VectorDBAdapter):
         """Bulk update existing documents by ID.
 
         Args:
-            documents: List of VectorDocument instances to update
+            docs: List of VectorDocument instances to update
             batch_size: Number of updates per batch (optional)
             ignore_conflicts: If True, skip missing documents
             update_fields: Specific fields to update (None = all fields)
@@ -754,44 +763,64 @@ class MilvusDBAdapter(VectorDBAdapter):
             List of successfully updated VectorDocument instances
 
         Raises:
-            ValueError: If collection not set or document missing (when ignore_conflicts=False)
+            CollectionNotInitializedError: If collection is not initialized
+            MissingDocumentError: If any document missing and ignore_conflicts=False
         """
         if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
-        if not documents:
+            raise CollectionNotInitializedError(
+                "Collection is not initialized", operation="bulk_update", adapter="Milvus"
+            )
+        if not docs:
             return []
 
-        dataset: List[Dict[str, Any]] = []
-        updated_docs: List[VectorDocument] = []
-        missing: List[str] = []
-
-        for doc in documents:
+        # Collect all PKs and validate
+        doc_map: Dict[str, VectorDocument] = {}
+        for doc in docs:
             pk = doc.pk
             if not pk:
-                if ignore_conflicts:
-                    continue
-                missing.append("<no_id>")
+                if not ignore_conflicts:
+                    raise MissingDocumentError("Document missing ID", missing_ids=["<no_id>"], operation="bulk_update")
                 continue
+            doc_map[pk] = doc
 
-            existing = self.client.get(collection_name=self.collection_name, ids=[pk])
-            if not existing:
-                if ignore_conflicts:
-                    continue
-                missing.append(pk)
-                continue
+        if not doc_map:
+            return []
 
+        # Fetch all existing documents in ONE query
+        pks = list(doc_map.keys())
+        existing_docs = self.client.get(collection_name=self.collection_name, ids=pks)
+        existing_map = {doc["id"]: doc for doc in existing_docs} if existing_docs else {}
+
+        # Check for missing documents
+        missing = [pk for pk in pks if pk not in existing_map]
+        if missing:
+            if not ignore_conflicts:
+                raise MissingDocumentError("Missing documents for update", missing_ids=missing, operation="bulk_update")
+            # Remove missing from processing
+            for pk in missing:
+                doc_map.pop(pk, None)
+
+        # Per-document upsert with optional batching (safer, avoids unintended insert of missing docs)
+        updated_docs: List[VectorDocument] = []
+        batch_buffer: List[Dict[str, Any]] = []
+
+        for pk, doc in doc_map.items():
+            existing = existing_map[pk]
             item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
             update_doc = apply_update_fields(item, update_fields)
+            if not update_doc:
+                continue
 
-            # Build replacement doc using existing + updates
-            vector = update_doc.get("$vector") or update_doc.get("vector") or existing[0].get("vector")
-            text_val = existing[0].get("text", "")
+            # Merge existing + updated fields
+            vector = update_doc.get("$vector") or update_doc.get("vector") or existing.get("vector")
+            text_val = existing.get("text", "")
             if self.store_text and "text" in update_doc:
                 text_val = update_doc["text"]
                 if len(text_val) > 65535:
                     text_val = text_val[:65535]
 
-            metadata = existing[0].get("metadata", {})
+            # Merge metadata
+            metadata = dict(existing.get("metadata", {}))
             for k, v in update_doc.items():
                 if k not in ("_id", "$vector", "text"):
                     metadata[k] = v
@@ -800,45 +829,50 @@ class MilvusDBAdapter(VectorDBAdapter):
             if self.store_text:
                 data["text"] = text_val
 
-            dataset.append(data)
+            if batch_size and batch_size > 0:
+                batch_buffer.append(data)
+                if len(batch_buffer) >= batch_size:
+                    self.client.upsert(collection_name=self.collection_name, data=batch_buffer)
+                    batch_buffer.clear()
+            else:
+                self.client.upsert(collection_name=self.collection_name, data=[data])
+
             updated_docs.append(doc)
 
-        if missing:
-            raise ValueError(f"Missing documents for update: {missing}")
+        # Flush remaining batch
+        if batch_buffer:
+            self.client.upsert(collection_name=self.collection_name, data=batch_buffer)
 
-        if dataset:
-            if batch_size and batch_size > 0:
-                for i in range(0, len(dataset), batch_size):
-                    self.client.upsert(collection_name=self.collection_name, data=dataset[i : i + batch_size])
-            else:
-                self.client.upsert(collection_name=self.collection_name, data=dataset)
-
-        log.info(f"Bulk updated {len(updated_docs)} document(s).")
+        self.logger.message(f"Bulk updated {len(updated_docs)} document(s).")
         return updated_docs
 
-    def upsert(self, documents: List[VectorDocument], batch_size: int = None) -> List[VectorDocument]:
+    def upsert(self, docs: List[VectorDocument], batch_size: int = None) -> List[VectorDocument]:
         """Insert or update multiple documents.
 
         Args:
-            documents: List of VectorDocument instances to upsert
+            docs: List of VectorDocument instances to upsert
             batch_size: Number of documents per batch (optional)
 
         Returns:
             List of upserted VectorDocument instances
 
         Raises:
-            ValueError: If collection_name is not set
+            CollectionNotInitializedError: If collection is not initialized
+            InvalidFieldError: If any document is missing a vector
         """
         if not self.collection_name:
-            raise ValueError("Collection name must be set. Call initialize().")
-        if not documents:
+            raise CollectionNotInitializedError("Collection is not initialized", operation="upsert", adapter="Milvus")
+        if not docs:
             return []
 
         data = []
-        for doc in documents:
+        for doc in docs:
             item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
             doc_id = doc.pk
             vector = item.get("vector")
+
+            if vector is None:
+                raise InvalidFieldError("Vector is required", field="vector", operation="upsert")
 
             doc_data: Dict[str, Any] = {"id": doc_id, "vector": vector}
             if self.store_text:
@@ -853,9 +887,9 @@ class MilvusDBAdapter(VectorDBAdapter):
 
         if batch_size and batch_size > 0:
             for i in range(0, len(data), batch_size):
-                self.client.insert(collection_name=self.collection_name, data=data[i : i + batch_size])
+                self.client.upsert(collection_name=self.collection_name, data=data[i : i + batch_size])
         else:
-            self.client.insert(collection_name=self.collection_name, data=data)
+            self.client.upsert(collection_name=self.collection_name, data=data)
 
-        log.info(f"Upserted {len(documents)} document(s).")
-        return documents
+        self.logger.message(f"Upserted {len(docs)} document(s).")
+        return docs

@@ -55,6 +55,12 @@ major vector databases.
 - **Type-Safe**: Full Pydantic validation
 - **Consistent API**: Same interface across all adapters
 
+### Logging & Error Handling (New)
+
+- **Unified Logging**: All modules use a centralized `Logger` with configurable level via `LOG_LEVEL`.
+- **Clear Exceptions**: Adapters and core modules raise specific errors (e.g., `MissingFieldError`, `InvalidFieldError`, `MissingConfigError`).
+- **Embeddings Errors**: Embedding adapters preserve API error types; configuration issues raise `MissingConfigError`.
+
 ## Supported Vector Databases
 
 | Database | Status | Features |
@@ -104,26 +110,25 @@ from crossvector.dbs.astradb import AstraDBAdapter
 
 # Initialize engine
 engine = VectorEngine(
-    embedding_adapter=OpenAIEmbeddingAdapter(model_name="text-embedding-3-small"),
-    db_adapter=AstraDBAdapter(),
+    db=AstraDBAdapter(),
+    embedding=OpenAIEmbeddingAdapter(model_name="text-embedding-3-small"),
     collection_name="my_documents",
     store_text=True  # Optional: Set to False to not store original text
 )
 
-# Create documents from texts with automatic embedding (recommended)
-docs = engine.upsert_from_texts(
-    texts=["The quick brown fox", "Artificial intelligence"],
-    metadatas=[{"category": "animals"}, {"category": "tech"}],
-    pks=["doc1", "doc2"]  # Optional: auto-generated if not provided
-)
-print(f"Inserted {len(docs)} documents")
+# Create documents from docs with automatic embedding (recommended)
+docs = engine.upsert([
+    {"id": "doc1", "text": "The quick brown fox", "metadata": {"category": "animals"}},
+    {"id": "doc2", "text": "Artificial intelligence", "metadata": {"category": "tech"}},
+])
+print(f"Upserted {len(docs)} documents")
 
 # Alternative: Upsert with VectorDocument (if you have embeddings already)
 vector_docs = [
     VectorDocument(
-        id="doc3", 
-        text="Python programming", 
-        vector=[0.1]*1536, 
+        id="doc3",
+        text="Python programming",
+        vector=[0.1]*1536,
         metadata={"category": "tech"}
     )
 ]
@@ -193,7 +198,32 @@ VECTOR_STORE_TEXT=false
 PRIMARY_KEY_MODE=uuid
 # Optional: custom PK factory (dotted path to callable)
 # PRIMARY_KEY_FACTORY=mymodule.custom_pk_generator
+
+# Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+LOG_LEVEL=INFO
+
+## Logging
+
+CrossVector configures a global logger and exposes a lightweight `Logger` wrapper used across adapters and engine. Control verbosity via `LOG_LEVEL`.
+
+```python
+from crossvector.logger import Logger
+
+log = Logger("example")
+log.message("Initialized component")  # Info-level message by default
+log.debug("Detailed event")
 ```
+
+## Error Handling
+
+CrossVector raises specific exceptions to make failures actionable:
+
+- `MissingFieldError`: required input missing (e.g., document id/vector)
+- `InvalidFieldError`: invalid value/type (e.g., mismatched dimension)
+- `MissingConfigError`: configuration not set (e.g., API keys, missing package)
+- `SearchError`: search operation failure (database-specific)
+
+Embedding adapters (`OpenAI`, `Gemini`) maintain original API error types for request failures; configuration errors use `MissingConfigError`.
 
 ## Database-Specific Examples
 
@@ -269,14 +299,14 @@ from typing import Any, Dict, List, Set, Optional, Union, Sequence, Tuple
 
 class MyCustomDBAdapter(VectorDBAdapter):
     """Custom vector database adapter implementation."""
-    
+
     # Optional: Set to True if your database uses '$vector' instead of 'vector'
     use_dollar_vector: bool = False
-    
+
     def initialize(
-        self, 
-        collection_name: str, 
-        embedding_dimension: int, 
+        self,
+        collection_name: str,
+        embedding_dimension: int,
         metric: str = "cosine",
         **kwargs: Any
     ) -> None:
@@ -285,9 +315,9 @@ class MyCustomDBAdapter(VectorDBAdapter):
         pass
 
     def add_collection(
-        self, 
-        collection_name: str, 
-        embedding_dimension: int, 
+        self,
+        collection_name: str,
+        embedding_dimension: int,
         metric: str = "cosine"
     ) -> Any:
         """Create a new collection."""
@@ -300,9 +330,9 @@ class MyCustomDBAdapter(VectorDBAdapter):
         pass
 
     def get_or_create_collection(
-        self, 
-        collection_name: str, 
-        embedding_dimension: int, 
+        self,
+        collection_name: str,
+        embedding_dimension: int,
         metric: str = "cosine"
     ) -> Any:
         """Get existing collection or create if doesn't exist."""
@@ -343,15 +373,8 @@ class MyCustomDBAdapter(VectorDBAdapter):
         # Should return VectorDocument instance
         pass
 
-    def get_or_create(
-        self, 
-        defaults: Optional[Dict[str, Any]] = None, 
-        **kwargs
-    ) -> Tuple[VectorDocument, bool]:
-        """Get document by pk or create if not found."""
-        # Your implementation
-        # Should return (VectorDocument, created: bool)
-        pass
+    # NOTE: get_or_create has been centralized in VectorEngine.
+    # Adapters no longer implement this to avoid duplicated logic.
 
     def create(self, **kwargs: Any) -> VectorDocument:
         """Create and persist a single document."""
@@ -384,16 +407,8 @@ class MyCustomDBAdapter(VectorDBAdapter):
         # Should return updated VectorDocument instance
         pass
 
-    def update_or_create(
-        self,
-        defaults: Optional[Dict[str, Any]] = None,
-        create_defaults: Optional[Dict[str, Any]] = None,
-        **kwargs
-    ) -> Tuple[VectorDocument, bool]:
-        """Update document if exists, otherwise create."""
-        # Your implementation
-        # Should return (VectorDocument, created: bool)
-        pass
+    # NOTE: update_or_create has been centralized in VectorEngine.
+    # Adapters no longer implement this to avoid duplicated logic.
 
     def bulk_update(
         self,
@@ -408,8 +423,8 @@ class MyCustomDBAdapter(VectorDBAdapter):
         pass
 
     def upsert(
-        self, 
-        documents: List[VectorDocument], 
+        self,
+        documents: List[VectorDocument],
         batch_size: int = None
     ) -> List[VectorDocument]:
         """Insert new documents or update existing ones."""
@@ -668,16 +683,15 @@ from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
 from crossvector.dbs.pgvector import PGVectorAdapter
 
 engine = VectorEngine(
-    embedding_adapter=OpenAIEmbeddingAdapter(),
-    db_adapter=PGVectorAdapter(),
+    db=PGVectorAdapter(),
+    embedding=OpenAIEmbeddingAdapter(),
     collection_name="docs",
     store_text=True
 )
 
-# 1. Create documents from texts (User Level - Recommended)
-result = engine.upsert_from_texts(
-    texts=["Python is a programming language"],
-    metadatas=[{"lang": "en", "category": "tech"}]
+# 1. Create documents from docs (User Level - Recommended)
+result = engine.upsert(
+    docs=["Python is a programming language"]
 )
 
 # Alternative: Create VectorDocument directly (if you have embeddings)

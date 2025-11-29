@@ -12,25 +12,35 @@ Key Features:
     - Automatic collection management and schema creation
 """
 
-import logging
-import os
-from typing import Any, Dict, List, Sequence, Set, Union, Tuple
+from typing import Any, Dict, List, Set
 
 import chromadb
 from chromadb.config import Settings
 
 from crossvector.abc import VectorDBAdapter
 from crossvector.constants import VECTOR_METRIC_MAP, VectorMetric
+from crossvector.exceptions import (
+    CollectionExistsError,
+    CollectionNotFoundError,
+    CollectionNotInitializedError,
+    DocumentExistsError,
+    DocumentNotFoundError,
+    DoesNotExist,
+    InvalidFieldError,
+    MissingDocumentError,
+    MissingFieldError,
+    MultipleObjectsReturned,
+    SearchError,
+)
 from crossvector.schema import VectorDocument
 from crossvector.settings import settings as api_settings
+from crossvector.types import DocIds
 from crossvector.utils import (
     apply_update_fields,
-    extract_id,
+    extract_pk,
     normalize_pks,
     prepare_item_for_storage,
 )
-
-log = logging.getLogger(__name__)
 
 
 class ChromaDBAdapter(VectorDBAdapter):
@@ -55,11 +65,11 @@ class ChromaDBAdapter(VectorDBAdapter):
         Args:
             **kwargs: Additional configuration options (currently unused)
         """
+        super(ChromaDBAdapter, self).__init__(**kwargs)
         self._client: chromadb.Client | None = None
         self._collection: chromadb.Collection | None = None
         self.collection_name: str | None = None
         self.embedding_dimension: int | None = None
-        log.info("ChromaDBAdapter initialized.")
 
     @property
     def client(self) -> chromadb.Client:
@@ -74,19 +84,19 @@ class ChromaDBAdapter(VectorDBAdapter):
             Initialized ChromaDB client instance
 
         Raises:
-            Exception: If all initialization attempts fail
+            MissingConfigError: If required configuration is missing
+            ConnectionError: If client initialization fails
         """
         if self._client is None:
             # 1) Try CloudClient if cloud API key present
-            cloud_api_key = os.getenv("CHROMA_CLOUD_API_KEY") or os.getenv("CHROMA_API_KEY")
-            cloud_tenant = os.getenv("CHROMA_CLOUD_TENANT") or os.getenv("CHROMA_TENANT")
-            cloud_database = os.getenv("CHROMA_CLOUD_DATABASE") or os.getenv("CHROMA_DATABASE")
-            if cloud_api_key:
+            if api_settings.CHROMA_API_KEY:
                 try:
                     self._client = chromadb.CloudClient(
-                        tenant=cloud_tenant, database=cloud_database, api_key=cloud_api_key
+                        tenant=api_settings.CHROMA_CLOUD_TENANT,
+                        database=api_settings.CHROMA_CLOUD_DATABASE,
+                        api_key=api_settings.CHROMA_API_KEY,
                     )
-                    log.info("ChromaDB CloudClient initialized.")
+                    self.logger.message("ChromaDB CloudClient initialized.")
                     return self._client
                 except Exception:
                     try:
@@ -94,37 +104,47 @@ class ChromaDBAdapter(VectorDBAdapter):
                         CloudClient = getattr(chromadb, "CloudClient", None)
                         if CloudClient:
                             self._client = CloudClient(
-                                tenant=cloud_tenant, database=cloud_database, api_key=cloud_api_key
+                                tenant=api_settings.CHROMA_CLOUD_TENANT,
+                                database=api_settings.CHROMA_CLOUD_DATABASE,
+                                api_key=api_settings.CHROMA_API_KEY,
                             )
-                            log.info("ChromaDB CloudClient (top-level) initialized.")
+                            self.logger.message("ChromaDB CloudClient (top-level) initialized.")
                             return self._client
-                    except Exception:
-                        log.exception("Failed to initialize ChromaDB CloudClient; falling back.")
+                    except Exception as exc:
+                        self.logger.error(
+                            f"Failed to initialize ChromaDB CloudClient, falling back. {exc}", exc_info=True
+                        )
+                        raise ConnectionError("Failed to initialize cloud ChromaDB client", adapter="ChromaDB")
 
             # 2) Try HttpClient (self-hosted server) if host/port provided
-            http_host = os.getenv("CHROMA_HTTP_HOST") or os.getenv("CHROMA_SERVER_HOST")
-            http_port = os.getenv("CHROMA_HTTP_PORT") or os.getenv("CHROMA_SERVER_PORT")
-            if http_host:
+            if api_settings.CHROMA_HTTP_HOST:
                 try:
                     HttpClient = getattr(chromadb, "HttpClient", None)
                     if HttpClient:
-                        if http_port:
-                            self._client = HttpClient(host=http_host, port=int(http_port))
+                        if api_settings.CHROMA_HTTP_PORT:
+                            self._client = HttpClient(
+                                host=api_settings.CHROMA_HTTP_HOST, port=int(api_settings.CHROMA_HTTP_PORT)
+                            )
                         else:
-                            self._client = HttpClient(host=http_host)
-                        log.info(f"ChromaDB HttpClient initialized (host={http_host}, port={http_port}).")
+                            self._client = HttpClient(host=api_settings.CHROMA_HTTP_HOST)
+
+                        self.logger.message(
+                            f"ChromaDB HttpClient initialized (host={api_settings.CHROMA_HTTP_HOST}, port={api_settings.CHROMA_HTTP_PORT})."
+                        )
                         return self._client
-                except Exception:
-                    log.exception("Failed to initialize ChromaDB HttpClient; falling back.")
+                except Exception as e:
+                    self.logger.error(f"Failed to initialize ChromaDB HttpClient; falling back. {e}", exc_info=True)
+                    raise ConnectionError("Failed to initialize self-hosted ChromaDB client", adapter="ChromaDB")
 
             # 3) Fallback: local persistence client
-            persist_dir = os.getenv("CHROMA_PERSIST_DIR", None)
-            settings = Settings(persist_directory=persist_dir) if persist_dir else Settings()
+            persist_dir = api_settings.CHROMA_PERSIST_DIR
+            settings_obj = Settings(persist_directory=persist_dir) if persist_dir else Settings()
             try:
-                self._client = chromadb.Client(settings)
-                log.info(f"ChromaDB local client initialized. Persist dir: {persist_dir}")
-            except Exception:
-                log.exception("Failed to initialize local ChromaDB client.")
+                self._client = chromadb.Client(settings_obj)
+                self.logger.message(f"ChromaDB local client initialized. Persist dir: {persist_dir}")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize local ChromaDB client: {e}", exc_info=True)
+                raise ConnectionError("Failed to initialize local ChromaDB client", adapter="ChromaDB")
         return self._client
 
     @property
@@ -138,7 +158,9 @@ class ChromaDBAdapter(VectorDBAdapter):
             ValueError: If collection_name or embedding_dimension not set
         """
         if not self.collection_name or not self.embedding_dimension:
-            raise ValueError("Collection name and embedding dimension must be set. Call initialize().")
+            raise CollectionNotInitializedError(
+                "Collection is not initialized", operation="property_access", adapter="ChromaDB"
+            )
         return self.get_collection(self.collection_name, self.embedding_dimension)
 
     # ------------------------------------------------------------------
@@ -164,9 +186,9 @@ class ChromaDBAdapter(VectorDBAdapter):
         """
         self.store_text = store_text if store_text is not None else api_settings.VECTOR_STORE_TEXT
         if metric is None:
-            metric = os.getenv("VECTOR_METRIC", VectorMetric.COSINE)
+            metric = api_settings.VECTOR_METRIC or VectorMetric.COSINE
         self.get_or_create_collection(collection_name, embedding_dimension, metric)
-        log.info(
+        self.logger.message(
             f"ChromaDB initialized: collection='{collection_name}', "
             f"dimension={embedding_dimension}, metric={metric}, store_text={self.store_text}"
         )
@@ -185,14 +207,16 @@ class ChromaDBAdapter(VectorDBAdapter):
             ChromaDB Collection instance
 
         Raises:
-            ValueError: If collection already exists
+            CollectionExistsError: If collection already exists
+            MissingConfigError: If required configuration is missing
+            SearchError: If collection creation fails
         """
         try:
             self.client.get_collection(collection_name)
-            raise ValueError(f"Collection '{collection_name}' already exists.")
+            raise CollectionExistsError("Collection already exists", collection_name=collection_name)
         except Exception as e:
             if "already exists" in str(e).lower():
-                raise ValueError(f"Collection '{collection_name}' already exists.") from e
+                raise CollectionExistsError("Collection already exists", collection_name=collection_name) from e
 
         self.collection_name = collection_name
         self.embedding_dimension = embedding_dimension
@@ -205,7 +229,7 @@ class ChromaDBAdapter(VectorDBAdapter):
             metadata={"hnsw:space": self.metric},
             embedding_function=None,
         )
-        log.info(f"ChromaDB collection '{collection_name}' created.")
+        self.logger.message(f"ChromaDB collection '{collection_name}' created.")
         return self._collection
 
     def get_collection(self, collection_name: str) -> chromadb.Collection:
@@ -218,15 +242,17 @@ class ChromaDBAdapter(VectorDBAdapter):
             ChromaDB Collection instance
 
         Raises:
-            ValueError: If collection doesn't exist
+            CollectionNotFoundError: If collection doesn't exist
+            MissingConfigError: If required configuration is missing
+            SearchError: If collection retrieval fails
         """
         try:
             self._collection = self.client.get_collection(collection_name)
             self.collection_name = collection_name
-            log.info(f"ChromaDB collection '{collection_name}' retrieved.")
+            self.logger.message(f"ChromaDB collection '{collection_name}' retrieved.")
             return self._collection
         except Exception as e:
-            raise ValueError(f"Collection '{collection_name}' does not exist.") from e
+            raise CollectionNotFoundError("Collection does not exist", collection_name=collection_name) from e
 
     def get_or_create_collection(
         self, collection_name: str, embedding_dimension: int, metric: str = VectorMetric.COSINE
@@ -244,6 +270,13 @@ class ChromaDBAdapter(VectorDBAdapter):
 
         Returns:
             ChromaDB Collection instance
+
+        Raises:
+            CollectionNotFoundError: If collection doesn't exist
+            CollectionExistsError: If collection already exists
+            CollectionNotInitializedError: If collection is not initialized
+            MissingConfigError: If required configuration is missing
+            SearchError: If collection creation or retrieval fails
         """
         self.collection_name = collection_name
         self.embedding_dimension = embedding_dimension
@@ -256,14 +289,14 @@ class ChromaDBAdapter(VectorDBAdapter):
 
         try:
             self._collection = self.client.get_collection(collection_name)
-            log.info(f"ChromaDB collection '{collection_name}' retrieved.")
+            self.logger.message(f"ChromaDB collection '{collection_name}' retrieved.")
         except Exception:
             self._collection = self.client.create_collection(
                 name=collection_name,
                 metadata={"hnsw:space": self.metric},
                 embedding_function=None,
             )
-            log.info(f"ChromaDB collection '{collection_name}' created.")
+            self.logger.message(f"ChromaDB collection '{collection_name}' created.")
         return self._collection
 
     def drop_collection(self, collection_name: str) -> bool:
@@ -276,7 +309,7 @@ class ChromaDBAdapter(VectorDBAdapter):
             True if successful
         """
         self.client.delete_collection(collection_name)
-        log.info(f"ChromaDB collection '{collection_name}' dropped.")
+        self.logger.message(f"ChromaDB collection '{collection_name}' dropped.")
         return True
 
     def clear_collection(self) -> int:
@@ -286,10 +319,12 @@ class ChromaDBAdapter(VectorDBAdapter):
             Number of documents deleted
 
         Raises:
-            ConnectionError: If collection is not initialized
+            CollectionNotInitializedError: If collection is not initialized
         """
         if not self.collection:
-            raise ConnectionError("ChromaDB collection is not initialized.")
+            raise CollectionNotInitializedError(
+                "Collection is not initialized", operation="clear_collection", adapter="ChromaDB"
+            )
         count = self.collection.count()
         if count == 0:
             return 0
@@ -297,7 +332,7 @@ class ChromaDBAdapter(VectorDBAdapter):
         ids = results["ids"]
         if ids:
             self.collection.delete(ids=ids)
-        log.info(f"Cleared {len(ids)} documents from collection.")
+        self.logger.message(f"Cleared {len(ids)} documents from collection.")
         return len(ids)
 
     def count(self) -> int:
@@ -310,7 +345,7 @@ class ChromaDBAdapter(VectorDBAdapter):
             ConnectionError: If collection is not initialized
         """
         if not self.collection:
-            raise ConnectionError("ChromaDB collection is not initialized.")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="count", adapter="ChromaDB")
         return self.collection.count()
 
     # ------------------------------------------------------------------
@@ -319,8 +354,8 @@ class ChromaDBAdapter(VectorDBAdapter):
 
     def search(
         self,
-        vector: List[float],
-        limit: int,
+        vector: List[float] | None = None,
+        limit: int | None = None,
         offset: int = 0,
         where: Dict[str, Any] | None = None,
         fields: Set[str] | None = None,
@@ -338,12 +373,41 @@ class ChromaDBAdapter(VectorDBAdapter):
             List of VectorDocument instances ordered by similarity
 
         Raises:
-            ConnectionError: If collection is not initialized
+            CollectionNotInitializedError: If collection is not initialized
+            SearchError: If neither vector nor where filter provided
         """
         if not self.collection:
-            raise ConnectionError("ChromaDB collection is not initialized.")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="search", adapter="ChromaDB")
 
-        # Determine what to include
+        if limit is None:
+            limit = api_settings.VECTOR_SEARCH_LIMIT
+
+        # Metadata-only search not directly supported by ChromaDB
+        # Use get with where filter if no vector provided
+        if vector is None:
+            if not where:
+                raise SearchError(
+                    "Either vector or where filter required for search", reason="both vector and where are missing"
+                )
+            # Use collection.get with where filter
+            include = ["metadatas"]
+            if self.store_text and (fields is None or "text" in fields):
+                include.append("documents")
+            results = self.collection.get(where=where, limit=limit + offset, include=include)
+            # Apply offset
+            ids = results["ids"][offset:] if results.get("ids") else []
+            metadatas = results["metadatas"][offset:] if results.get("metadatas") else []
+            documents = results["documents"][offset:] if results.get("documents") else [None] * len(ids)
+            vector_docs = []
+            for id_, meta, doc in zip(ids, metadatas, documents):
+                doc_dict = {"_id": id_, "metadata": meta or {}}
+                if doc is not None:
+                    doc_dict["text"] = doc
+                vector_docs.append(VectorDocument.from_kwargs(**doc_dict))
+            self.logger.message(f"Search returned {len(vector_docs)} results.")
+            return vector_docs
+
+        # Vector search path
         include = ["metadatas", "distances"]
         if self.store_text:
             if fields is None or "text" in fields:
@@ -378,147 +442,134 @@ class ChromaDBAdapter(VectorDBAdapter):
                 doc_dict["text"] = doc
             vector_docs.append(VectorDocument.from_kwargs(**doc_dict))
 
-        log.info(f"Vector search returned {len(vector_docs)} results.")
+        self.logger.message(f"Vector search returned {len(vector_docs)} results.")
         return vector_docs
 
     # ------------------------------------------------------------------
     # CRUD Operations
     # ------------------------------------------------------------------
 
-    def get(self, pk: Any = None, **kwargs) -> VectorDocument:
-        """Retrieve a single document by its ID.
+    def get(self, *args, **kwargs) -> VectorDocument:
+        """Retrieve a single document by its ID or metadata filter.
 
         Args:
-            pk: Primary key value (positional)
-            **kwargs: Alternative way to specify id via _id/id/pk keys
+            *args: Optional positional pk
+            **kwargs: Metadata fields for filtering (e.g., name="value", status="active")
+                     Special keys: pk/id/_id for direct lookup
 
         Returns:
             VectorDocument instance
 
         Raises:
-            ConnectionError: If collection is not initialized
-            ValueError: If document ID is missing or document not found
+            CollectionNotInitializedError: If collection is not initialized
+            MissingFieldError: If neither pk nor metadata filters provided
+            DoesNotExist: If no document matches
+            MultipleObjectsReturned: If multiple documents match
         """
         if not self.collection:
-            raise ConnectionError("ChromaDB collection is not initialized.")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="get", adapter="ChromaDB")
 
-        doc_id = pk or extract_id(kwargs)
-        if not doc_id:
-            raise ValueError("Document ID is required (provide pk or id/_id/pk in kwargs)")
+        pk = args[0] if args else None
+        doc_id = pk or extract_pk(None, **kwargs) if not pk else pk
 
-        results = self.collection.get(ids=[doc_id], include=["embeddings", "metadatas", "documents"])
-        if not results["ids"]:
-            raise ValueError(f"Document with ID '{doc_id}' not found")
+        # Priority 1: Direct pk lookup
+        if doc_id:
+            results = self.collection.get(ids=[doc_id], limit=2, include=["embeddings", "metadatas", "documents"])
+            if not results["ids"]:
+                raise DoesNotExist(f"Document with ID '{doc_id}' not found")
+            if len(results["ids"]) > 1:
+                raise MultipleObjectsReturned(f"Multiple documents found with ID '{doc_id}'")
+            doc_data = {
+                "_id": results["ids"][0],
+                "vector": results["embeddings"][0] if results.get("embeddings") else None,
+                "metadata": results["metadatas"][0] if results["metadatas"] else {},
+            }
+            if results.get("documents"):
+                doc_data["text"] = results["documents"][0]
+            return VectorDocument.from_kwargs(**doc_data)
 
-        doc_data = {
-            "_id": results["ids"][0],
-            "vector": results["embeddings"][0],
-            "metadata": results["metadatas"][0] if results["metadatas"] else {},
-        }
-        if results.get("documents"):
-            doc_data["text"] = results["documents"][0]
+        # Priority 2: Search by metadata kwargs using search method
+        metadata_kwargs = {k: v for k, v in kwargs.items() if k not in ("pk", "id", "_id")}
+        if not metadata_kwargs:
+            raise MissingFieldError(
+                "Either pk/id/_id or metadata filter kwargs required", field="id or filter", operation="get"
+            )
 
-        return VectorDocument.from_kwargs(**doc_data)
+        results = self.search(vector=None, where=metadata_kwargs, limit=2)
+        if not results:
+            raise DoesNotExist("No document found matching metadata filter")
+        if len(results) > 1:
+            raise MultipleObjectsReturned("Multiple documents found matching metadata filter")
+        return results[0]
 
-    def create(self, **kwargs: Any) -> VectorDocument:
+    def create(self, doc: VectorDocument) -> VectorDocument:
         """Create and persist a single document.
 
-        Expected kwargs:
-            vector/$vector: List[float] - Vector embedding (required)
-            text: str - Original text content (optional)
-            metadata: dict - Additional metadata (optional)
-            id/_id/pk: str - Explicit document ID (optional, auto-generated if missing)
-
         Args:
-            **kwargs: Document fields as keyword arguments
+            doc: VectorDocument instance to create
 
         Returns:
             Created VectorDocument instance
 
         Raises:
-            ConnectionError: If collection is not initialized
-            ValueError: If vector is missing or document with same ID already exists
+            CollectionNotInitializedError: If collection is not initialized
+            InvalidFieldError: If vector is missing
+            DocumentExistsError: If document with same ID already exists
         """
         if not self.collection:
-            raise ConnectionError("ChromaDB collection is not initialized.")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="create", adapter="ChromaDB")
 
-        doc = VectorDocument.from_kwargs(**kwargs)
         stored = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
 
         pk = doc.pk
         vector = stored.get("$vector") or stored.get("vector")
         if vector is None:
-            raise ValueError("Vector ('$vector' or 'vector') is required for create in ChromaDB.")
+            raise InvalidFieldError("Vector is required", field="vector", operation="create")
 
         # Conflict check
         existing = self.collection.get(ids=[pk])
         if existing.get("ids"):
-            raise ValueError(f"Conflict: document with id '{pk}' already exists.")
+            raise DocumentExistsError("Document already exists", document_id=pk)
 
         text = stored.get("text") if self.store_text else None
         metadata = {k: v for k, v in stored.items() if k not in ("_id", "$vector", "text")}
 
         self.collection.add(ids=[pk], embeddings=[vector], metadatas=[metadata], documents=[text] if text else None)
-        log.info(f"Created document with id '{pk}'.")
+        self.logger.message(f"Created document with id '{pk}'.")
         return doc
 
-    def get_or_create(self, defaults: Dict[str, Any] | None = None, **kwargs) -> Tuple[VectorDocument, bool]:
-        """Get a document by ID or create it if not found.
-
-        Args:
-            defaults: Default values to use when creating new document
-            **kwargs: Lookup fields and values (must include id/_id/pk)
-
-        Returns:
-            Tuple of (document, created) where created is True if new document was created
-
-        Raises:
-            ConnectionError: If collection is not initialized
-        """
-        if not self.collection:
-            raise ConnectionError("ChromaDB collection is not initialized.")
-
-        lookup_id = extract_id(kwargs)
-        if lookup_id:
-            try:
-                found = self.get(lookup_id)
-                return found, False
-            except ValueError:
-                pass
-
-        # Create new document with merged defaults
-        merged = {**(defaults or {}), **kwargs}
-        new_doc = self.create(**merged)
-        return new_doc, True
-
-    def update(self, **kwargs) -> VectorDocument:
+    def update(self, doc: VectorDocument, **kwargs) -> VectorDocument:
         """Update a single document by ID.
 
         Strict update semantics: raises error if document doesn't exist.
 
         Args:
-            **kwargs: Must include id/_id/pk, plus fields to update
+            doc: VectorDocument to update (must include id/pk)
 
         Returns:
             Updated VectorDocument instance
 
         Raises:
-            ConnectionError: If collection is not initialized
-            ValueError: If ID is missing or document not found
+            CollectionNotInitializedError: If collection is not initialized
+            MissingFieldError: If ID is missing
+            DocumentNotFoundError: If document not found
         """
         if not self.collection:
-            raise ConnectionError("ChromaDB collection is not initialized.")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="update", adapter="ChromaDB")
 
-        id_val = extract_id(kwargs)
-        if not id_val:
-            raise ValueError("'id', '_id', or 'pk' is required for update")
+        pk = doc.id or extract_pk(None, **kwargs)
+        if not pk:
+            raise MissingFieldError("'id', '_id', or 'pk' is required for update", field="id", operation="update")
 
         # Get existing document
-        existing = self.collection.get(ids=[id_val], include=["embeddings", "metadatas", "documents"])
+        existing = self.collection.get(ids=[pk], include=["embeddings", "metadatas", "documents"])
         if not existing["ids"]:
-            raise ValueError(f"Document with ID '{id_val}' not found")
+            raise DocumentNotFoundError("Document not found", document_id=pk, operation="update")
 
-        prepared = prepare_item_for_storage(kwargs, store_text=self.store_text)
+        prepared = prepare_item_for_storage(
+            doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector),
+            store_text=self.store_text,
+        )
         vector = prepared.get("$vector") or prepared.get("vector") or existing["embeddings"][0]
         text = prepared.get("text") if self.store_text else (existing.get("documents", [None])[0])
 
@@ -528,13 +579,11 @@ class ChromaDBAdapter(VectorDBAdapter):
             if k not in ("_id", "$vector", "text"):
                 metadata[k] = v
 
-        self.collection.update(
-            ids=[id_val], embeddings=[vector], metadatas=[metadata], documents=[text] if text else None
-        )
-        log.info(f"Updated document with id '{id_val}'.")
+        self.collection.update(ids=[pk], embeddings=[vector], metadatas=[metadata], documents=[text] if text else None)
+        self.logger.message(f"Updated document with id '{pk}'.")
 
         # Return refreshed document
-        refreshed = self.collection.get(ids=[id_val], include=["embeddings", "metadatas", "documents"])
+        refreshed = self.collection.get(ids=[pk], include=["embeddings", "metadatas", "documents"])
         doc_data = {
             "_id": refreshed["ids"][0],
             "vector": refreshed["embeddings"][0],
@@ -545,39 +594,7 @@ class ChromaDBAdapter(VectorDBAdapter):
 
         return VectorDocument.from_kwargs(**doc_data)
 
-    def update_or_create(
-        self, defaults: Dict[str, Any] | None = None, create_defaults: Dict[str, Any] | None = None, **kwargs
-    ) -> Tuple[VectorDocument, bool]:
-        """Update document if exists, otherwise create with merged defaults.
-
-        Args:
-            defaults: Default values for both update and create
-            create_defaults: Default values used only when creating (overrides defaults)
-            **kwargs: Fields to update or use for creation
-
-        Returns:
-            Tuple of (document, created) where created is True if new document was created
-
-        Raises:
-            ConnectionError: If collection is not initialized
-        """
-        if not self.collection:
-            raise ConnectionError("ChromaDB collection is not initialized.")
-
-        lookup_id = extract_id(kwargs)
-        if lookup_id:
-            try:
-                updated = self.update(**kwargs)
-                return updated, False
-            except ValueError:
-                pass
-
-        # Create new document
-        merged = {**(create_defaults or defaults or {}), **kwargs}
-        new_doc = self.create(**merged)
-        return new_doc, True
-
-    def delete(self, ids: Union[str, Sequence[str]]) -> int:
+    def delete(self, ids: DocIds) -> int:
         """Delete document(s) by ID.
 
         Args:
@@ -587,17 +604,17 @@ class ChromaDBAdapter(VectorDBAdapter):
             Number of documents deleted
 
         Raises:
-            ConnectionError: If collection is not initialized
+            CollectionNotInitializedError: If collection is not initialized
         """
         if not self.collection:
-            raise ConnectionError("ChromaDB collection is not initialized.")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="delete", adapter="ChromaDB")
 
         pks = normalize_pks(ids)
         if not pks:
             return 0
 
         self.collection.delete(ids=pks)
-        log.info(f"Deleted {len(pks)} document(s).")
+        self.logger.message(f"Deleted {len(pks)} document(s).")
         return len(pks)
 
     # ------------------------------------------------------------------
@@ -606,7 +623,7 @@ class ChromaDBAdapter(VectorDBAdapter):
 
     def bulk_create(
         self,
-        documents: List[VectorDocument],
+        docs: List[VectorDocument],
         batch_size: int = None,
         ignore_conflicts: bool = False,
         update_conflicts: bool = False,
@@ -615,7 +632,7 @@ class ChromaDBAdapter(VectorDBAdapter):
         """Bulk create multiple documents.
 
         Args:
-            documents: List of VectorDocument instances to create
+            docs: List of VectorDocument instances to create
             batch_size: Number of documents per batch (optional)
             ignore_conflicts: If True, skip conflicting documents
             update_conflicts: If True, update conflicting documents
@@ -625,12 +642,15 @@ class ChromaDBAdapter(VectorDBAdapter):
             List of successfully created VectorDocument instances
 
         Raises:
-            ConnectionError: If collection is not initialized
-            ValueError: If conflict occurs and ignore_conflicts=False
+            CollectionNotInitializedError: If collection is not initialized
+            InvalidFieldError: If vector missing
+            DocumentExistsError: If conflict occurs and ignore_conflicts=False
         """
         if not self.collection:
-            raise ConnectionError("ChromaDB collection is not initialized.")
-        if not documents:
+            raise CollectionNotInitializedError(
+                "Collection is not initialized", operation="bulk_create", adapter="ChromaDB"
+            )
+        if not docs:
             return []
 
         to_add_ids: List[str] = []
@@ -639,12 +659,12 @@ class ChromaDBAdapter(VectorDBAdapter):
         to_add_texts: List[str | None] = []
         created_docs: List[VectorDocument] = []
 
-        for doc in documents:
+        for doc in docs:
             item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
             pk = doc.pk
             vector = item.get("$vector") or item.get("vector")
             if vector is None:
-                raise ValueError("Vector required for bulk_create in ChromaDB.")
+                raise InvalidFieldError("Vector is required", field="vector", operation="bulk_create")
 
             # Conflict detection (id only)
             existing = self.collection.get(ids=[pk])
@@ -664,7 +684,7 @@ class ChromaDBAdapter(VectorDBAdapter):
                         documents=[text_update] if text_update else None,
                     )
                     continue
-                raise ValueError(f"Conflict on id '{pk}' during bulk_create.")
+                raise DocumentExistsError("Document already exists", document_id=pk, operation="bulk_create")
 
             metadata = {k: v for k, v in item.items() if k not in ("_id", "$vector", "text")}
             text_val = item.get("text") if self.store_text else None
@@ -699,12 +719,12 @@ class ChromaDBAdapter(VectorDBAdapter):
                 documents=to_add_texts if self.store_text else None,
             )
 
-        log.info(f"Bulk created {len(created_docs)} document(s).")
+        self.logger.message(f"Bulk created {len(created_docs)} document(s).")
         return created_docs
 
     def bulk_update(
         self,
-        documents: List[VectorDocument],
+        docs: List[VectorDocument],
         batch_size: int = None,
         ignore_conflicts: bool = False,
         update_fields: List[str] = None,
@@ -712,7 +732,7 @@ class ChromaDBAdapter(VectorDBAdapter):
         """Bulk update existing documents by ID.
 
         Args:
-            documents: List of VectorDocument instances to update
+            docs: List of VectorDocument instances to update
             batch_size: Number of updates per batch (optional)
             ignore_conflicts: If True, skip missing documents
             update_fields: Specific fields to update (None = all fields)
@@ -721,69 +741,133 @@ class ChromaDBAdapter(VectorDBAdapter):
             List of successfully updated VectorDocument instances
 
         Raises:
-            ConnectionError: If collection is not initialized
-            ValueError: If any document is missing and ignore_conflicts=False
+            CollectionNotInitializedError: If collection is not initialized
+            MissingDocumentError: If any document is missing and ignore_conflicts=False
         """
         if not self.collection:
-            raise ConnectionError("ChromaDB collection is not initialized.")
-        if not documents:
+            raise CollectionNotInitializedError(
+                "Collection is not initialized", operation="bulk_update", adapter="ChromaDB"
+            )
+        if not docs:
             return []
 
-        updated_docs: List[VectorDocument] = []
+        # Collect pks and map docs (avoid N+1 lookups)
+        pk_doc_map: Dict[str, VectorDocument] = {}
         missing: List[str] = []
-
-        for doc in documents:
+        for doc in docs:
             pk = doc.pk
             if not pk:
                 if ignore_conflicts:
                     continue
                 missing.append("<no_id>")
                 continue
+            pk_doc_map[pk] = doc
 
-            existing = self.collection.get(ids=[pk], include=["embeddings", "metadatas", "documents"])
-            if not existing.get("ids"):
-                if ignore_conflicts:
-                    continue
+        if not pk_doc_map:
+            if missing and not ignore_conflicts:
+                raise MissingDocumentError("Missing documents for update", missing_ids=missing, operation="bulk_update")
+            return []
+
+        all_pks = list(pk_doc_map.keys())
+        existing_batch = self.collection.get(ids=all_pks, include=["embeddings", "metadatas", "documents"])
+        # Chroma returns only existing ids; build position map
+        existing_ids = existing_batch.get("ids", []) or []
+        id_index: Dict[str, int] = {pid: idx for idx, pid in enumerate(existing_ids)}
+
+        # Determine missing ids
+        for pk in all_pks:
+            if pk not in id_index and not ignore_conflicts:
                 missing.append(pk)
+
+        if missing and not ignore_conflicts:
+            raise MissingDocumentError("Missing documents for update", missing_ids=missing, operation="bulk_update")
+
+        # Build update payloads
+        update_ids: List[str] = []
+        update_vectors: List[List[float]] = []
+        update_metadatas: List[Dict[str, Any] | None] = []
+        update_texts: List[str | None] = []
+        updated_docs: List[VectorDocument] = []
+
+        embeddings_list = existing_batch.get("embeddings", []) or []
+        metadatas_list = existing_batch.get("metadatas", []) or []
+        documents_list = existing_batch.get("documents", []) or []
+
+        for pk, doc in pk_doc_map.items():
+            if pk not in id_index:
+                # skipped due to ignore_conflicts
                 continue
+            idx = id_index[pk]
+            existing_embedding = embeddings_list[idx] if idx < len(embeddings_list) else None
+            existing_metadata = metadatas_list[idx] if idx < len(metadatas_list) else {}
+            existing_text = documents_list[idx] if idx < len(documents_list) else None
 
             item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
             update_doc = apply_update_fields(item, update_fields)
+            if not update_doc:
+                continue
 
-            meta_update = {k: v for k, v in update_doc.items() if k not in ("_id", "$vector", "text")}
-            vector_update = update_doc.get("$vector") or update_doc.get("vector") or existing["embeddings"][0]
+            vector_update = update_doc.get("$vector") or update_doc.get("vector") or existing_embedding
+            # Merge metadata: preserve existing then overlay update fields (excluding reserved keys)
+            metadata_merge = dict(existing_metadata)
+            for k, v in update_doc.items():
+                if k not in ("_id", "$vector", "text", "vector"):
+                    metadata_merge[k] = v
+            meta_update = metadata_merge if metadata_merge else None
             text_update = update_doc.get("text") if self.store_text else None
+            if text_update is None and self.store_text:
+                text_update = existing_text
 
-            self.collection.update(
-                ids=[pk],
-                embeddings=[vector_update],
-                metadatas=[meta_update] if meta_update else None,
-                documents=[text_update] if text_update else None,
-            )
+            update_ids.append(pk)
+            update_vectors.append(vector_update)
+            update_metadatas.append(meta_update)
+            update_texts.append(text_update if self.store_text else None)
             updated_docs.append(doc)
 
-        if missing:
-            raise ValueError(f"Missing documents for update: {missing}")
+        if not updated_docs:
+            self.logger.message("Bulk updated 0 document(s).")
+            return []
 
-        log.info(f"Bulk updated {len(updated_docs)} document(s).")
+        # Perform batched updates to reduce round-trips
+        if batch_size and batch_size > 0:
+            for i in range(0, len(update_ids), batch_size):
+                slice_ids = update_ids[i : i + batch_size]
+                slice_vectors = update_vectors[i : i + batch_size]
+                slice_meta = update_metadatas[i : i + batch_size]
+                slice_docs = update_texts[i : i + batch_size] if self.store_text else None
+                self.collection.update(
+                    ids=slice_ids,
+                    embeddings=slice_vectors,
+                    metadatas=slice_meta,
+                    documents=slice_docs,
+                )
+        else:
+            self.collection.update(
+                ids=update_ids,
+                embeddings=update_vectors,
+                metadatas=update_metadatas,
+                documents=update_texts if self.store_text else None,
+            )
+
+        self.logger.message(f"Bulk updated {len(updated_docs)} document(s). (single fetch, batched writes)")
         return updated_docs
 
-    def upsert(self, documents: List[VectorDocument], batch_size: int = None) -> List[VectorDocument]:
+    def upsert(self, docs: List[VectorDocument], batch_size: int = None) -> List[VectorDocument]:
         """Insert or update multiple documents.
 
         Args:
-            documents: List of VectorDocument instances to upsert
+            docs: List of VectorDocument instances to upsert
             batch_size: Number of documents per batch (optional)
 
         Returns:
             List of upserted VectorDocument instances
 
         Raises:
-            ConnectionError: If collection is not initialized
+            CollectionNotInitializedError: If collection is not initialized
         """
         if not self.collection:
-            raise ConnectionError("ChromaDB collection is not initialized.")
-        if not documents:
+            raise CollectionNotInitializedError("Collection is not initialized", operation="upsert", adapter="ChromaDB")
+        if not docs:
             return []
 
         ids = []
@@ -791,7 +875,7 @@ class ChromaDBAdapter(VectorDBAdapter):
         metadatas = []
         texts = []
 
-        for doc in documents:
+        for doc in docs:
             item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
             ids.append(doc.pk)
             vectors.append(item.get("$vector") or item.get("vector"))
@@ -799,25 +883,26 @@ class ChromaDBAdapter(VectorDBAdapter):
             metadatas.append(metadata)
             texts.append(item.get("text") if self.store_text else None)
 
+        # Use Chroma's native upsert API to insert or update
         if batch_size and batch_size > 0:
             for i in range(0, len(ids), batch_size):
                 slice_ids = ids[i : i + batch_size]
                 slice_vecs = vectors[i : i + batch_size]
                 slice_meta = metadatas[i : i + batch_size]
                 slice_docs = texts[i : i + batch_size] if self.store_text else None
-                self.collection.add(
+                self.collection.upsert(
                     ids=slice_ids,
                     embeddings=slice_vecs,
                     metadatas=slice_meta,
                     documents=slice_docs,
                 )
         else:
-            self.collection.add(
+            self.collection.upsert(
                 ids=ids,
                 embeddings=vectors,
                 metadatas=metadatas,
                 documents=texts if self.store_text else None,
             )
 
-        log.info(f"Upserted {len(documents)} document(s).")
-        return documents
+        self.logger.message(f"Upserted {len(docs)} document(s).")
+        return docs

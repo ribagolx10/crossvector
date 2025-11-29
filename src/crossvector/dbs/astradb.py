@@ -11,9 +11,7 @@ Key Features:
     - Automatic collection management and schema creation
 """
 
-import logging
-import os
-from typing import Any, Dict, List, Sequence, Set, Tuple, Union
+from typing import Any, Dict, List, Set
 
 from astrapy import DataAPIClient
 from astrapy.constants import DOC
@@ -24,17 +22,29 @@ from astrapy.info import CollectionDefinition, CollectionVectorOptions
 
 from crossvector.abc import VectorDBAdapter
 from crossvector.constants import VECTOR_METRIC_MAP, VectorMetric
+from crossvector.exceptions import (
+    CollectionExistsError,
+    CollectionNotFoundError,
+    CollectionNotInitializedError,
+    DocumentExistsError,
+    DocumentNotFoundError,
+    DoesNotExist,
+    MissingConfigError,
+    MissingDocumentError,
+    MissingFieldError,
+    MultipleObjectsReturned,
+    SearchError,
+)
 from crossvector.schema import VectorDocument
 from crossvector.settings import settings as api_settings
+from crossvector.types import DocIds
 from crossvector.utils import (
     apply_update_fields,
     chunk_iter,
-    extract_id,
+    extract_pk,
     normalize_pks,
     prepare_item_for_storage,
 )
-
-log = logging.getLogger(__name__)
 
 
 class AstraDBAdapter(VectorDBAdapter):
@@ -59,13 +69,13 @@ class AstraDBAdapter(VectorDBAdapter):
         Args:
             **kwargs: Additional configuration options (currently unused)
         """
+        super(AstraDBAdapter, self).__init__(**kwargs)
         self._client: DataAPIClient | None = None
         self._db: Database | None = None
         self.collection: Collection | None = None
         self.collection_name: str | None = None
         self.embedding_dimension: int | None = None
         self.store_text: bool = True
-        log.info("AstraDBAdapter initialized.")
 
     @property
     def client(self) -> DataAPIClient:
@@ -75,13 +85,17 @@ class AstraDBAdapter(VectorDBAdapter):
             Initialized DataAPIClient instance
 
         Raises:
-            ValueError: If ASTRA_DB_APPLICATION_TOKEN is not configured
+            MissingConfigError: If ASTRA_DB_APPLICATION_TOKEN is not configured
         """
         if self._client is None:
             if not api_settings.ASTRA_DB_APPLICATION_TOKEN:
-                raise ValueError("ASTRA_DB_APPLICATION_TOKEN is not set. Please configure it in your .env file.")
+                raise MissingConfigError(
+                    "ASTRA_DB_APPLICATION_TOKEN is not set. Please configure it in your .env file.",
+                    config_key="ASTRA_DB_APPLICATION_TOKEN",
+                    env_file=".env",
+                )
             self._client = DataAPIClient(token=api_settings.ASTRA_DB_APPLICATION_TOKEN)
-            log.info("AstraDB DataAPIClient initialized.")
+            self.logger.message("AstraDB DataAPIClient initialized.")
         return self._client
 
     @property
@@ -92,13 +106,17 @@ class AstraDBAdapter(VectorDBAdapter):
             Initialized Database instance
 
         Raises:
-            ValueError: If ASTRA_DB_API_ENDPOINT is not configured
+            MissingConfigError: If ASTRA_DB_API_ENDPOINT is not configured
         """
         if self._db is None:
             if not api_settings.ASTRA_DB_API_ENDPOINT:
-                raise ValueError("ASTRA_DB_API_ENDPOINT is not set. Please configure it in your .env file.")
+                raise MissingConfigError(
+                    "ASTRA_DB_API_ENDPOINT is not set. Please configure it in your .env file.",
+                    config_key="ASTRA_DB_API_ENDPOINT",
+                    env_file=".env",
+                )
             self._db = self.client.get_database(api_endpoint=api_settings.ASTRA_DB_API_ENDPOINT)
-            log.info("AstraDB database connection established.")
+            self.logger.message("AstraDB database connection established.")
         return self._db
 
     # ------------------------------------------------------------------
@@ -124,9 +142,9 @@ class AstraDBAdapter(VectorDBAdapter):
         """
         self.store_text = store_text if store_text is not None else api_settings.VECTOR_STORE_TEXT
         if metric is None:
-            metric = os.getenv("VECTOR_METRIC", VectorMetric.COSINE)
+            metric = api_settings.VECTOR_METRIC or VectorMetric.COSINE
         self.get_or_create_collection(collection_name, embedding_dimension, metric)
-        log.info(
+        self.logger.message(
             f"AstraDB initialized: collection='{collection_name}', "
             f"dimension={embedding_dimension}, metric={metric}, store_text={self.store_text}"
         )
@@ -149,7 +167,7 @@ class AstraDBAdapter(VectorDBAdapter):
         """
         existing_collections = self.db.list_collection_names()
         if collection_name in existing_collections:
-            raise ValueError(f"Collection '{collection_name}' already exists.")
+            raise CollectionExistsError("Collection already exists", collection_name=collection_name)
 
         self.collection_name = collection_name
         self.embedding_dimension = embedding_dimension
@@ -166,7 +184,7 @@ class AstraDBAdapter(VectorDBAdapter):
                 ),
             ),
         )
-        log.info(f"AstraDB collection '{collection_name}' created successfully.")
+        self.logger.message(f"AstraDB collection '{collection_name}' created successfully.")
         return self.collection
 
     def get_collection(self, collection_name: str) -> Collection[DOC]:
@@ -183,11 +201,11 @@ class AstraDBAdapter(VectorDBAdapter):
         """
         existing_collections = self.db.list_collection_names()
         if collection_name not in existing_collections:
-            raise ValueError(f"Collection '{collection_name}' does not exist.")
+            raise CollectionNotFoundError("Collection does not exist", collection_name=collection_name)
 
         self.collection = self.db.get_collection(collection_name)
         self.collection_name = collection_name
-        log.info(f"AstraDB collection '{collection_name}' retrieved.")
+        self.logger.message(f"AstraDB collection '{collection_name}' retrieved.")
         return self.collection
 
     def get_or_create_collection(
@@ -208,7 +226,11 @@ class AstraDBAdapter(VectorDBAdapter):
             AstraDB Collection instance
 
         Raises:
-            Exception: If collection initialization fails
+            CollectionExistsError: If collection already exists
+            CollectionNotFoundError: If collection does not exist
+            CollectionNotInitializedError: If collection is not initialized
+            MissingConfigError: If configuration is missing
+            SearchError: If collection initialization fails
         """
         try:
             self.collection_name = collection_name
@@ -220,10 +242,10 @@ class AstraDBAdapter(VectorDBAdapter):
 
             if collection_name in existing_collections:
                 self.collection = self.db.get_collection(collection_name)
-                log.info(f"AstraDB collection '{collection_name}' retrieved.")
+                self.logger.message(f"AstraDB collection '{collection_name}' retrieved.")
             else:
                 vector_metric = VECTOR_METRIC_MAP.get(metric.lower(), AstraVectorMetric.COSINE)
-                log.info(f"Creating AstraDB collection '{collection_name}'...")
+                self.logger.message(f"Creating AstraDB collection '{collection_name}'...")
                 self.collection = self.db.create_collection(
                     collection_name,
                     definition=CollectionDefinition(
@@ -233,12 +255,24 @@ class AstraDBAdapter(VectorDBAdapter):
                         ),
                     ),
                 )
-                log.info(f"AstraDB collection '{collection_name}' created successfully.")
+                self.logger.message(f"AstraDB collection '{collection_name}' created successfully.")
 
             return self.collection
-        except Exception as e:
-            log.error(f"Failed to initialize AstraDB collection: {e}", exc_info=True)
+        except CollectionExistsError as e:
+            self.logger.error(f"Collection already exists: {e}", exc_info=True)
             raise
+        except CollectionNotFoundError as e:
+            self.logger.error(f"Collection does not exist: {e}", exc_info=True)
+            raise
+        except CollectionNotInitializedError as e:
+            self.logger.error(f"Collection not initialized: {e}", exc_info=True)
+            raise
+        except MissingConfigError as e:
+            self.logger.error(f"Missing configuration: {e}", exc_info=True)
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to initialize AstraDB collection: {e}", exc_info=True)
+            raise SearchError(f"Failed to initialize AstraDB collection: {e}")
 
     def drop_collection(self, collection_name: str) -> bool:
         """Drop the specified collection.
@@ -250,7 +284,7 @@ class AstraDBAdapter(VectorDBAdapter):
             True if successful
         """
         self.db.drop_collection(collection_name)
-        log.info(f"AstraDB collection '{collection_name}' dropped.")
+        self.logger.message(f"AstraDB collection '{collection_name}' dropped.")
         return True
 
     def clear_collection(self) -> int:
@@ -260,12 +294,14 @@ class AstraDBAdapter(VectorDBAdapter):
             Number of documents deleted
 
         Raises:
-            ConnectionError: If collection is not initialized
+            CollectionNotInitializedError: If collection is not initialized
         """
         if not self.collection:
-            raise ConnectionError("AstraDB collection is not initialized.")
+            raise CollectionNotInitializedError(
+                "Collection is not initialized", operation="clear_collection", adapter="AstraDB"
+            )
         result = self.collection.delete_many({})
-        log.info(f"Cleared {result.deleted_count} documents from collection.")
+        self.logger.message(f"Cleared {result.deleted_count} documents from collection.")
         return result.deleted_count
 
     def count(self) -> int:
@@ -275,10 +311,10 @@ class AstraDBAdapter(VectorDBAdapter):
             Total document count
 
         Raises:
-            ConnectionError: If collection is not initialized
+            CollectionNotInitializedError: If collection is not initialized
         """
         if not self.collection:
-            raise ConnectionError("AstraDB collection is not initialized.")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="count", adapter="AstraDB")
         count = self.collection.count_documents({}, upper_bound=10000)
         return count
 
@@ -288,8 +324,8 @@ class AstraDBAdapter(VectorDBAdapter):
 
     def search(
         self,
-        vector: List[float],
-        limit: int,
+        vector: List[float] | None = None,
+        limit: int | None = None,
         offset: int = 0,
         where: Dict[str, Any] | None = None,
         fields: Set[str] | None = None,
@@ -307,10 +343,13 @@ class AstraDBAdapter(VectorDBAdapter):
             List of VectorDocument instances ordered by similarity
 
         Raises:
-            ConnectionError: If collection is not initialized
+            CollectionNotInitializedError: If collection is not initialized
         """
         if not self.collection:
-            raise ConnectionError("AstraDB collection is not initialized.")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="search", adapter="AstraDB")
+
+        if limit is None:
+            limit = api_settings.VECTOR_SEARCH_LIMIT
 
         try:
             # Construct projection to exclude vector by default
@@ -323,190 +362,156 @@ class AstraDBAdapter(VectorDBAdapter):
 
             # AstraDB doesn't have native skip, so we fetch limit+offset and slice
             fetch_limit = limit + offset
-            results = list(
-                self.collection.find(
-                    filter=filter_query,
-                    sort={"$vector": vector},
-                    limit=fetch_limit,
-                    projection=projection,
+
+            if vector is None:
+                # Metadata-only search (no vector sorting)
+                results = list(
+                    self.collection.find(
+                        filter=filter_query,
+                        limit=fetch_limit,
+                        projection=projection,
+                    )
                 )
-            )
+            else:
+                # Vector search with sorting
+                results = list(
+                    self.collection.find(
+                        filter=filter_query,
+                        sort={"$vector": vector},
+                        limit=fetch_limit,
+                        projection=projection,
+                    )
+                )
 
             # Apply offset by slicing
             results = results[offset:]
 
             # Convert to VectorDocument instances
             documents = [VectorDocument.from_kwargs(**doc) for doc in results]
-            log.info(f"Vector search returned {len(documents)} results.")
+            self.logger.message(f"Vector search returned {len(documents)} results.")
             return documents
         except Exception as e:
-            log.error(f"Vector search failed: {e}", exc_info=True)
+            self.logger.error(f"Vector search failed: {e}", exc_info=True)
             raise
 
     # ------------------------------------------------------------------
     # CRUD Operations
     # ------------------------------------------------------------------
 
-    def get(self, pk: Any = None, **kwargs) -> VectorDocument:
-        """Retrieve a single document by its ID.
+    def get(self, *args, **kwargs) -> VectorDocument:
+        """Retrieve a single document by its ID or metadata filter.
 
         Args:
-            pk: Primary key value (positional)
-            **kwargs: Alternative way to specify id via _id/id/pk keys
+            *args: Optional positional pk
+            **kwargs: Metadata fields for filtering (e.g., name="value", status="active")
+                     Special keys: pk/id/_id for direct lookup
 
         Returns:
             VectorDocument instance
 
         Raises:
-            ConnectionError: If collection is not initialized
-            ValueError: If document ID is missing or document not found
+            CollectionNotInitializedError: If collection is not initialized
+            DoesNotExist: If no document matches
+            MultipleObjectsReturned: If multiple documents match
         """
         if not self.collection:
-            raise ConnectionError("AstraDB collection is not initialized.")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="get", adapter="AstraDB")
 
-        doc_id = pk or extract_id(kwargs)
-        if not doc_id:
-            raise ValueError("Document ID is required (provide pk or id/_id/pk in kwargs)")
+        pk = args[0] if args else None
+        doc_id = pk or extract_pk(None, **kwargs) if not pk else pk
 
-        doc = self.collection.find_one({"_id": doc_id})
-        if not doc:
-            raise ValueError(f"Document with ID '{doc_id}' not found")
+        # Priority 1: Direct pk lookup
+        if doc_id:
+            results = list(self.collection.find({"_id": doc_id}, limit=2))
+            if not results:
+                raise DoesNotExist(f"Document with ID '{doc_id}' not found")
+            if len(results) > 1:
+                raise MultipleObjectsReturned(f"Multiple documents found with ID '{doc_id}'")
+            return VectorDocument.from_kwargs(**results[0])
 
-        return VectorDocument.from_kwargs(**doc)
+        # Priority 2: Search by metadata kwargs using search method
+        metadata_kwargs = {k: v for k, v in kwargs.items() if k not in ("pk", "id", "_id")}
+        if not metadata_kwargs:
+            raise MissingFieldError(
+                "Either pk/id/_id or metadata filter kwargs required", field="id or filter", operation="get"
+            )
 
-    def create(self, **kwargs: Any) -> VectorDocument:
+        results = self.search(vector=None, where=metadata_kwargs, limit=2)
+        if not results:
+            raise DoesNotExist("No document found matching metadata filter")
+        if len(results) > 1:
+            raise MultipleObjectsReturned("Multiple documents found matching metadata filter")
+        return results[0]
+
+    def create(self, doc: VectorDocument) -> VectorDocument:
         """Create and persist a single document.
 
-        Expected kwargs:
-            vector/$vector: List[float] - Vector embedding (required)
-            text: str - Original text content (optional)
-            metadata: dict - Additional metadata (optional)
-            id/_id/pk: str - Explicit document ID (optional, auto-generated if missing)
-
         Args:
-            **kwargs: Document fields as keyword arguments
+            doc: VectorDocument instance to create
 
         Returns:
             Created VectorDocument instance
 
         Raises:
-            ConnectionError: If collection is not initialized
-            ValueError: If document with same ID already exists
+            CollectionNotInitializedError: If collection is not initialized
+            DocumentExistsError: If document with same ID already exists
         """
         if not self.collection:
-            raise ConnectionError("AstraDB collection is not initialized.")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="create", adapter="AstraDB")
 
-        doc = VectorDocument.from_kwargs(**kwargs)
         stored = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
 
         # Conflict check
         if self.collection.find_one({"_id": doc.pk}):
-            raise ValueError(f"Conflict: document with id '{doc.pk}' already exists.")
+            raise DocumentExistsError("Document already exists", document_id=doc.pk)
 
         self.collection.insert_one(stored)
-        log.info(f"Created document with id '{doc.pk}'.")
+        self.logger.message(f"Created document with id '{doc.pk}'.")
         return doc
 
-    def get_or_create(self, defaults: Dict[str, Any] | None = None, **kwargs) -> Tuple[VectorDocument, bool]:
-        """Get a document by ID or create it if not found.
-
-        Args:
-            defaults: Default values to use when creating new document
-            **kwargs: Lookup fields and values (must include id/_id/pk)
-
-        Returns:
-            Tuple of (document, created) where created is True if new document was created
-
-        Raises:
-            ConnectionError: If collection is not initialized
-        """
-        if not self.collection:
-            raise ConnectionError("AstraDB collection is not initialized.")
-
-        lookup_id = extract_id(kwargs)
-        if lookup_id:
-            try:
-                found = self.get(lookup_id)
-                return found, False
-            except ValueError:
-                pass
-
-        # Create new document with merged defaults
-        merged = {**(defaults or {}), **kwargs}
-        new_doc = self.create(**merged)
-        return new_doc, True
-
-    def update(self, **kwargs) -> VectorDocument:
+    def update(self, doc: VectorDocument, **kwargs) -> VectorDocument:
         """Update a single document by ID.
 
         Strict update semantics: raises error if document doesn't exist.
 
         Args:
-            **kwargs: Must include id/_id/pk, plus fields to update
+            doc: VectorDocument to update (must include id/pk)
 
         Returns:
             Updated VectorDocument instance
 
         Raises:
-            ConnectionError: If collection is not initialized
-            ValueError: If ID is missing or document not found
+            CollectionNotInitializedError: If collection is not initialized
+            MissingFieldError: If ID is missing
+            DocumentNotFoundError: If document not found
         """
         if not self.collection:
-            raise ConnectionError("AstraDB collection is not initialized.")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="update", adapter="AstraDB")
 
-        id_val = extract_id(kwargs)
-        if not id_val:
-            raise ValueError("'id', '_id', or 'pk' is required for update")
+        pk = doc.id or extract_pk(None, **kwargs)
+        if not pk:
+            raise MissingFieldError("'id', '_id', or 'pk' is required for update", field="id", operation="update")
 
-        existing = self.collection.find_one({"_id": id_val})
+        existing = self.collection.find_one({"_id": pk})
         if not existing:
-            raise ValueError(f"Document with ID '{id_val}' not found")
+            raise DocumentNotFoundError("Document not found", document_id=pk, operation="update")
 
-        prepared = prepare_item_for_storage(kwargs, store_text=self.store_text)
+        prepared = prepare_item_for_storage(
+            doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector),
+            store_text=self.store_text,
+        )
         update_doc = {k: v for k, v in prepared.items() if k not in ("_id", "$vector")}
         if "$vector" in prepared:
             update_doc["$vector"] = prepared["$vector"]
 
         if update_doc:
-            self.collection.update_one({"_id": id_val}, {"$set": update_doc})
-            log.info(f"Updated document with id '{id_val}'.")
+            self.collection.update_one({"_id": pk}, {"$set": update_doc})
+            self.logger.message(f"Updated document with id '{pk}'.")
 
-        refreshed = self.collection.find_one({"_id": id_val})
+        refreshed = self.collection.find_one({"_id": pk})
         return VectorDocument.from_kwargs(**refreshed)
 
-    def update_or_create(
-        self, defaults: Dict[str, Any] | None = None, create_defaults: Dict[str, Any] | None = None, **kwargs
-    ) -> Tuple[VectorDocument, bool]:
-        """Update document if exists, otherwise create with merged defaults.
-
-        Args:
-            defaults: Default values for both update and create
-            create_defaults: Default values used only when creating (overrides defaults)
-            **kwargs: Fields to update or use for creation
-
-        Returns:
-            Tuple of (document, created) where created is True if new document was created
-
-        Raises:
-            ConnectionError: If collection is not initialized
-        """
-        if not self.collection:
-            raise ConnectionError("AstraDB collection is not initialized.")
-
-        lookup_id = extract_id(kwargs)
-        if lookup_id:
-            try:
-                updated = self.update(**kwargs)
-                return updated, False
-            except ValueError:
-                pass
-
-        # Create new document
-        merged = {**(create_defaults or defaults or {}), **kwargs}
-        new_doc = self.create(**merged)
-        return new_doc, True
-
-    def delete(self, ids: Union[str, Sequence[str]]) -> int:
+    def delete(self, ids: DocIds) -> int:
         """Delete document(s) by ID.
 
         Args:
@@ -516,10 +521,10 @@ class AstraDBAdapter(VectorDBAdapter):
             Number of documents deleted
 
         Raises:
-            ConnectionError: If collection is not initialized
+            CollectionNotInitializedError: If collection is not initialized
         """
         if not self.collection:
-            raise ConnectionError("AstraDB collection is not initialized.")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="delete", adapter="AstraDB")
 
         pks = normalize_pks(ids)
         if not pks:
@@ -532,7 +537,7 @@ class AstraDBAdapter(VectorDBAdapter):
             result = self.collection.delete_many({"_id": {"$in": pks}})
             deleted = result.deleted_count
 
-        log.info(f"Deleted {deleted} document(s).")
+        self.logger.message(f"Deleted {deleted} document(s).")
         return deleted
 
     # ------------------------------------------------------------------
@@ -541,7 +546,7 @@ class AstraDBAdapter(VectorDBAdapter):
 
     def bulk_create(
         self,
-        documents: List[VectorDocument],
+        docs: List[VectorDocument],
         batch_size: int = None,
         ignore_conflicts: bool = False,
         update_conflicts: bool = False,
@@ -550,7 +555,7 @@ class AstraDBAdapter(VectorDBAdapter):
         """Bulk create multiple documents.
 
         Args:
-            documents: List of VectorDocument instances to create
+            docs: List of VectorDocument instances to create
             batch_size: Number of documents per batch (optional)
             ignore_conflicts: If True, skip conflicting documents
             update_conflicts: If True, update conflicting documents
@@ -560,18 +565,20 @@ class AstraDBAdapter(VectorDBAdapter):
             List of successfully created VectorDocument instances
 
         Raises:
-            ConnectionError: If collection is not initialized
-            ValueError: If conflict occurs and ignore_conflicts=False
+            CollectionNotInitializedError: If collection is not initialized
+            DocumentExistsError: If conflict occurs and ignore_conflicts=False
         """
         if not self.collection:
-            raise ConnectionError("AstraDB collection is not initialized.")
-        if not documents:
+            raise CollectionNotInitializedError(
+                "Collection is not initialized", operation="bulk_create", adapter="AstraDB"
+            )
+        if not docs:
             return []
 
         items_to_insert: List[Dict[str, Any]] = []
         created_docs: List[VectorDocument] = []
 
-        for doc in documents:
+        for doc in docs:
             item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
             pk = doc.pk
 
@@ -586,7 +593,9 @@ class AstraDBAdapter(VectorDBAdapter):
                     if update_doc:
                         self.collection.update_one({"_id": existing["_id"]}, {"$set": update_doc})
                     continue
-                raise ValueError(f"Conflict on unique fields for document _id={item.get('_id')}")
+                raise DocumentExistsError(
+                    "Document already exists", document_id=item.get("_id"), operation="bulk_create"
+                )
 
             items_to_insert.append(item)
             created_docs.append(doc)
@@ -598,12 +607,12 @@ class AstraDBAdapter(VectorDBAdapter):
             else:
                 self.collection.insert_many(items_to_insert)
 
-        log.info(f"Bulk created {len(created_docs)} document(s).")
+        self.logger.message(f"Bulk created {len(created_docs)} document(s).")
         return created_docs
 
     def bulk_update(
         self,
-        documents: List[VectorDocument],
+        docs: List[VectorDocument],
         batch_size: int = None,
         ignore_conflicts: bool = False,
         update_fields: List[str] = None,
@@ -611,7 +620,7 @@ class AstraDBAdapter(VectorDBAdapter):
         """Bulk update existing documents by ID.
 
         Args:
-            documents: List of VectorDocument instances to update
+            docs: List of VectorDocument instances to update
             batch_size: Number of updates per batch (optional)
             ignore_conflicts: If True, skip missing documents
             update_fields: Specific fields to update (None = all fields)
@@ -620,83 +629,117 @@ class AstraDBAdapter(VectorDBAdapter):
             List of successfully updated VectorDocument instances
 
         Raises:
-            ConnectionError: If collection is not initialized
-            ValueError: If any document is missing and ignore_conflicts=False
+            CollectionNotInitializedError: If collection is not initialized
+            MissingDocumentError: If any document is missing and ignore_conflicts=False
         """
         if not self.collection:
-            raise ConnectionError("AstraDB collection is not initialized.")
-        if not documents:
+            raise CollectionNotInitializedError(
+                "Collection is not initialized", operation="bulk_update", adapter="AstraDB"
+            )
+        if not docs:
             return []
 
-        updated_docs: List[VectorDocument] = []
-        missing: List[str] = []
-        batch_ops: List[Dict[str, Any]] = []
-
-        for doc in documents:
+        # Collect and validate primary keys
+        pk_to_doc: Dict[str, VectorDocument] = {}
+        for doc in docs:
             pk = doc.pk
             if not pk:
                 if ignore_conflicts:
                     continue
-                missing.append("<no_id>")
-                continue
+                raise MissingDocumentError("Document missing ID", missing_ids=["<no_id>"], operation="bulk_update")
+            pk_to_doc[pk] = doc
 
-            existing = self.collection.find_one({"_id": pk})
-            if not existing:
-                if ignore_conflicts:
-                    continue
-                missing.append(pk)
-                continue
+        if not pk_to_doc:
+            return []
+
+        # Single query to fetch existing documents (avoid N+1)
+        pks = list(pk_to_doc.keys())
+        existing_docs = list(self.collection.find({"_id": {"$in": pks}}))
+        existing_map = {d["_id"]: d for d in existing_docs}
+
+        # Detect missing
+        missing = [pk for pk in pks if pk not in existing_map]
+        if missing and not ignore_conflicts:
+            raise MissingDocumentError("Missing documents for update", missing_ids=missing, operation="bulk_update")
+
+        # Perform per-document updates (AstraDB has no multi-update with per-doc different bodies)
+        updated_docs: List[VectorDocument] = []
+        for pk, doc in pk_to_doc.items():
+            if pk not in existing_map:
+                continue  # skipped due to ignore_conflicts
 
             item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
             update_doc = apply_update_fields(item, update_fields)
             if not update_doc:
                 continue
 
-            batch_ops.append({"filter": {"_id": pk}, "update": {"$set": update_doc}})
-            updated_docs.append(doc)
+            # Prepare $set payload (preserve vector field if present)
+            set_payload: Dict[str, Any] = {}
+            for k, v in update_doc.items():
+                if k == "$vector":
+                    set_payload["$vector"] = v
+                elif k != "_id":
+                    set_payload[k] = v
 
-            # Flush batch if size reached
-            if batch_size and batch_size > 0 and len(batch_ops) >= batch_size:
-                for op in batch_ops:
-                    self.collection.update_one(op["filter"], op["update"])
-                batch_ops.clear()
+            if set_payload:
+                self.collection.update_one({"_id": pk}, {"$set": set_payload})
+                updated_docs.append(doc)
 
-        # Flush remaining operations
-        for op in batch_ops:
-            self.collection.update_one(op["filter"], op["update"])
-
-        if missing:
-            raise ValueError(f"Missing documents for update: {missing}")
-
-        log.info(f"Bulk updated {len(updated_docs)} document(s).")
+        self.logger.message(f"Bulk updated {len(updated_docs)} document(s).")
         return updated_docs
 
-    def upsert(self, documents: List[VectorDocument], batch_size: int = None) -> List[VectorDocument]:
+    def upsert(self, docs: List[VectorDocument], batch_size: int = None) -> List[VectorDocument]:
         """Insert or update multiple documents.
 
         Args:
-            documents: List of VectorDocument instances to upsert
+            docs: List of VectorDocument instances to upsert
             batch_size: Number of documents per batch (optional)
 
         Returns:
             List of upserted VectorDocument instances
 
         Raises:
-            ConnectionError: If collection is not initialized
+            CollectionNotInitializedError: If collection is not initialized
         """
         if not self.collection:
-            raise ConnectionError("AstraDB collection is not initialized.")
+            raise CollectionNotInitializedError("Collection is not initialized", operation="upsert", adapter="AstraDB")
+        if not docs:
+            return []
 
-        items = [
-            doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
-            for doc in documents
-        ]
+        # Collect all IDs for single fetch (avoid N+1 lookups)
+        ids = [doc.pk for doc in docs if doc.pk]
+        existing_docs = list(self.collection.find({"_id": {"$in": ids}})) if ids else []
+        existing_map = {d["_id"]: d for d in existing_docs}
 
-        if batch_size and batch_size > 0:
-            for chunk in chunk_iter(items, batch_size):
-                self.collection.insert_many(list(chunk))
-        else:
-            self.collection.insert_many(items)
+        to_insert: List[Dict[str, Any]] = []
+        updated: List[VectorDocument] = []
+        inserted: List[VectorDocument] = []
 
-        log.info(f"Upserted {len(documents)} document(s).")
-        return documents
+        for doc in docs:
+            item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
+            pk = doc.pk
+            if pk in existing_map:
+                # Build $set update excluding _id
+                set_payload: Dict[str, Any] = {}
+                for k, v in item.items():
+                    if k == "_id":
+                        continue
+                    set_payload[k] = v
+                if set_payload:
+                    self.collection.update_one({"_id": pk}, {"$set": set_payload})
+                updated.append(doc)
+            else:
+                to_insert.append(item)
+                inserted.append(doc)
+
+        # Batch insert new documents
+        if to_insert:
+            if batch_size and batch_size > 0:
+                for chunk in chunk_iter(to_insert, batch_size):
+                    self.collection.insert_many(list(chunk))
+            else:
+                self.collection.insert_many(to_insert)
+
+        total = len(updated) + len(inserted)
+        self.logger.message(f"Upserted {total} document(s) (created={len(inserted)}, updated={len(updated)}).")
+        return updated + inserted

@@ -1,15 +1,24 @@
 """Abstract Base Classes for the Vector Store components."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Set, Tuple, Optional, Union, Sequence
+from typing import Any, Dict, List, Set
+
+from crossvector.logger import Logger
+
 from .schema import VectorDocument
+from .types import DocIds
 
 
 class EmbeddingAdapter(ABC):
     """Abstract base class for embedding providers."""
 
-    def __init__(self, model_name: str, **kwargs: Any):
+    def __init__(self, model_name: str, logger: Logger = None, **kwargs: Any):
         self.model_name = model_name
+        self._logger = logger if isinstance(logger, Logger) else Logger(self.__class__.__name__)
+
+    @property
+    def logger(self) -> Logger:
+        return self._logger
 
     @property
     @abstractmethod
@@ -46,6 +55,15 @@ class VectorDBAdapter(ABC):
 
     use_dollar_vector: bool = False
 
+    def __init__(self, logger: Logger = None, **kwargs: Any) -> None:
+        # Base init primarily for standardized logging across adapters
+        self._logger = logger if isinstance(logger, Logger) else Logger(self.__class__.__name__)
+        self._logger.message("%s initialized with kwargs=%s", self.__class__.__name__, kwargs)
+
+    @property
+    def logger(self) -> Logger:
+        return self._logger
+
     @abstractmethod
     def initialize(self, collection_name: str, embedding_dimension: int, metric: str = "cosine", **kwargs: Any) -> None:
         """Initialize the database and ensure the collection is ready for use.
@@ -59,7 +77,7 @@ class VectorDBAdapter(ABC):
 
         Raises:
             ConnectionError: If database connection fails
-            ValueError: If configuration parameters are invalid
+            InvalidConfigError: If configuration parameters are invalid
         """
         raise NotImplementedError
 
@@ -77,7 +95,7 @@ class VectorDBAdapter(ABC):
             The collection object or handle specific to the backend
 
         Raises:
-            ValueError: If collection with the same name already exists
+            CollectionExistsError: If collection with the same name already exists
             ConnectionError: If database connection fails
         """
         raise NotImplementedError
@@ -93,7 +111,7 @@ class VectorDBAdapter(ABC):
             The collection object or handle specific to the backend
 
         Raises:
-            ValueError: If collection doesn't exist
+            CollectionNotFoundError: If collection doesn't exist
             ConnectionError: If database connection fails
         """
         raise NotImplementedError
@@ -139,7 +157,7 @@ class VectorDBAdapter(ABC):
             Number of documents deleted
 
         Raises:
-            ConnectionError: If collection is not initialized
+            CollectionNotInitializedError: If collection is not initialized
         """
         raise NotImplementedError
 
@@ -151,15 +169,15 @@ class VectorDBAdapter(ABC):
             Total document count
 
         Raises:
-            ConnectionError: If collection is not initialized
+            CollectionNotInitializedError: If collection is not initialized
         """
         raise NotImplementedError
 
     @abstractmethod
     def search(
         self,
-        vector: List[float],
-        limit: int,
+        vector: List[float] | None = None,
+        limit: int | None = None,
         offset: int = 0,
         where: Dict[str, Any] | None = None,
         fields: Set[str] | None = None,
@@ -167,8 +185,8 @@ class VectorDBAdapter(ABC):
         """Perform vector similarity search to find nearest neighbors.
 
         Args:
-            vector: Query vector embedding to search for
-            limit: Maximum number of results to return
+            vector: Query vector embedding to search for. If None, performs metadata-only query.
+            limit: Maximum number of results to return. If None, uses VECTOR_SEARCH_LIMIT from settings.
             offset: Number of results to skip (for pagination). Default is 0.
             where: Optional metadata filter conditions as key-value pairs.
                 Only documents matching all conditions will be returned.
@@ -177,73 +195,59 @@ class VectorDBAdapter(ABC):
 
         Returns:
             List of VectorDocument instances ordered by similarity score (most similar first)
+            when vector is provided, or arbitrary order when vector is None.
 
         Raises:
-            ConnectionError: If collection is not initialized
-            ValueError: If vector dimension doesn't match collection dimension
+            CollectionNotInitializedError: If collection is not initialized
+            InvalidFieldError: If vector dimension doesn't match collection dimension (when vector provided)
         """
         raise NotImplementedError
 
     @abstractmethod
     def get(self, *args, **kwargs) -> VectorDocument:
-        """Retrieve a single document by its primary key.
+        """Retrieve a single document by key or metadata.
+
+        Django-style semantics:
+        - Priority 1: If a positional `pk` or keyword `pk/id/_id` is provided, fetch by primary key.
+        - Priority 2: Use remaining kwargs as metadata filter. Must return exactly one row.
 
         Args:
-            pk: Primary key value (positional argument)
-            **kwargs: Alternative way to specify key via pk/id/_id in kwargs
+            *args: Optional positional `pk` value.
+            **kwargs: Metadata fields for filtering (e.g., name="value", status="active")
+                     Special keys: `pk`/`id`/`_id` for primary key lookup
 
         Returns:
             VectorDocument instance
 
         Raises:
-            ConnectionError: If collection is not initialized
-            ValueError: If document pk is missing or document not found
+            CollectionNotInitializedError: If collection is not initialized
+            MissingFieldError: If input is invalid (no pk and no metadata kwargs)
+            DoesNotExist: If no document matches filter
+            MultipleObjectsReturned: If more than one document matches filter
         """
         raise NotImplementedError
 
     @abstractmethod
-    def get_or_create(self, defaults: Optional[Dict[str, Any]] = None, **kwargs) -> Tuple[VectorDocument, bool]:
-        """Get document by pk or create if not found.
-
-        Args:
-            defaults: Default values to use when creating new document
-            **kwargs: Lookup fields including pk/id/_id, plus additional fields
-
-        Returns:
-            Tuple of (VectorDocument, created) where created is True if new document
-            was created, False if existing document was retrieved
-
-        Raises:
-            ConnectionError: If collection is not initialized
-            ValueError: If required fields are missing
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    def create(self, **kwargs: Any) -> VectorDocument:
+    def create(self, doc: VectorDocument) -> VectorDocument:
         """Create and persist a single document in the collection.
 
         Args:
-            **kwargs: Document fields as keyword arguments
-                vector/$vector: List[float] - Vector embedding (required)
-                text: str - Original text content (optional)
-                metadata: dict - Additional metadata (optional)
-                pk/id/_id: str - Explicit primary key (optional, auto-generated if missing)
-                Additional arbitrary metadata keys are allowed
+            doc: VectorDocument instance to create (must have vector)
 
         Returns:
             Created VectorDocument instance
 
         Raises:
-            ConnectionError: If collection is not initialized
-            ValueError: If document with same pk already exists or required fields missing
+            CollectionNotInitializedError: If collection is not initialized
+            DocumentExistsError: If document with same pk already exists
+            MissingFieldError: If required fields are missing
         """
         raise NotImplementedError
 
     @abstractmethod
     def bulk_create(
         self,
-        documents: List[VectorDocument],
+        docs: List[VectorDocument],
         batch_size: int = None,
         ignore_conflicts: bool = False,
         update_conflicts: bool = False,
@@ -252,7 +256,7 @@ class VectorDBAdapter(ABC):
         """Create multiple documents in batch for improved performance.
 
         Args:
-            documents: List of VectorDocument instances to create
+            docs: List of VectorDocument instances to create
             batch_size: Number of documents per batch (optional, uses adapter default)
             ignore_conflicts: If True, skip documents with conflicting pk
             update_conflicts: If True, update existing documents on pk conflict
@@ -263,13 +267,13 @@ class VectorDBAdapter(ABC):
             List of successfully created VectorDocument instances
 
         Raises:
-            ConnectionError: If collection is not initialized
-            ValueError: If conflict occurs and both ignore_conflicts and update_conflicts are False
+            CollectionNotInitializedError: If collection is not initialized
+            DocumentExistsError: If conflict occurs and both ignore_conflicts and update_conflicts are False
         """
         raise NotImplementedError
 
     @abstractmethod
-    def delete(self, ids: Union[str, Sequence[str]]) -> int:
+    def delete(self, ids: DocIds) -> int:
         """Delete document(s) by primary key.
 
         Args:
@@ -279,58 +283,34 @@ class VectorDBAdapter(ABC):
             Number of documents successfully deleted
 
         Raises:
-            ConnectionError: If collection is not initialized
+            CollectionNotInitializedError: If collection is not initialized
         """
         raise NotImplementedError
 
     @abstractmethod
-    def update(self, **kwargs) -> VectorDocument:
-        """Update existing document by pk with partial or full updates.
+    def update(self, doc: VectorDocument, **kwargs) -> VectorDocument:
+        """Update existing document by pk.
 
         Strict update semantics: raises error if document doesn't exist.
 
         Args:
-            **kwargs: Must include pk/id/_id, plus fields to update
-                pk/id/_id: str - Primary key of document to update (required)
-                vector/$vector: List[float] - New vector embedding (optional)
-                text: str - New text content (optional)
-                metadata: dict - Metadata to merge/update (optional)
-                Additional fields to update as key-value pairs
+            doc: VectorDocument instance to update (must include valid id/pk)
+            **kwargs: Optional backend-specific flags
 
         Returns:
             Updated VectorDocument instance
 
         Raises:
-            ConnectionError: If collection is not initialized
-            ValueError: If pk is missing or document doesn't exist
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    def update_or_create(
-        self, defaults: Optional[Dict[str, Any]] = None, create_defaults: Optional[Dict[str, Any]] = None, **kwargs
-    ) -> Tuple[VectorDocument, bool]:
-        """Update document if exists, otherwise create with merged defaults.
-
-        Args:
-            defaults: Default values for both update and create operations
-            create_defaults: Values used only when creating (overrides defaults)
-            **kwargs: Fields to update or use for creation, should include pk/id/_id
-
-        Returns:
-            Tuple of (VectorDocument, created) where created is True if new document
-            was created, False if existing document was updated
-
-        Raises:
-            ConnectionError: If collection is not initialized
-            ValueError: If required fields are missing
+            CollectionNotInitializedError: If collection is not initialized
+            MissingFieldError: If pk is missing
+            DocumentNotFoundError: If document doesn't exist
         """
         raise NotImplementedError
 
     @abstractmethod
     def bulk_update(
         self,
-        documents: List[VectorDocument],
+        docs: List[VectorDocument],
         batch_size: int = None,
         ignore_conflicts: bool = False,
         update_fields: List[str] = None,
@@ -338,7 +318,7 @@ class VectorDBAdapter(ABC):
         """Update multiple existing documents by pk in batch.
 
         Args:
-            documents: List of VectorDocument instances to update (each must have valid pk)
+            docs: List of VectorDocument instances to update (each must have valid pk)
             batch_size: Number of updates per batch (optional, uses adapter default)
             ignore_conflicts: If True, skip documents that don't exist instead of raising error
             update_fields: Specific fields to update (None means update all fields except pk)
@@ -347,24 +327,24 @@ class VectorDBAdapter(ABC):
             List of successfully updated VectorDocument instances
 
         Raises:
-            ConnectionError: If collection is not initialized
-            ValueError: If any document is missing and ignore_conflicts=False
+            CollectionNotInitializedError: If collection is not initialized
+            MissingDocumentError: If any document is missing and ignore_conflicts=False
         """
         raise NotImplementedError
 
     @abstractmethod
-    def upsert(self, documents: List[VectorDocument], batch_size: int = None) -> List[VectorDocument]:
+    def upsert(self, docs: List[VectorDocument], batch_size: int = None) -> List[VectorDocument]:
         """Insert new documents or update existing ones by pk in batch.
 
         Args:
-            documents: List of VectorDocument instances to upsert
+            docs: List of VectorDocument instances to upsert
             batch_size: Number of documents per batch (optional, uses adapter default)
 
         Returns:
             List of upserted VectorDocument instances
 
         Raises:
-            ConnectionError: If collection is not initialized
-            ValueError: If required fields are missing
+            CollectionNotInitializedError: If collection is not initialized
+            MissingFieldError: If required fields are missing
         """
         raise NotImplementedError

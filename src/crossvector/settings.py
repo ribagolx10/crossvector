@@ -1,6 +1,6 @@
 """Settings for CrossVector engine."""
 
-from typing import Optional, Literal
+from typing import Literal, Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -15,6 +15,7 @@ class CrossVectorSettings(BaseSettings):
     # Gemini
     GOOGLE_API_KEY: Optional[str] = None
     GEMINI_API_KEY: Optional[str] = None
+    GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
 
     # AstraDB
     ASTRA_DB_APPLICATION_TOKEN: Optional[str] = None
@@ -44,6 +45,8 @@ class CrossVectorSettings(BaseSettings):
     # Vector settings
     VECTOR_METRIC: str = "cosine"
     VECTOR_STORE_TEXT: bool = False
+    LOG_LEVEL: str = "DEBUG"
+    VECTOR_SEARCH_LIMIT: int = 10
     PRIMARY_KEY_MODE: Literal["uuid", "hash_text", "hash_vector", "int64", "auto"] = (
         "uuid"  # choices: uuid, hash_text, hash_vector, int64, auto
     )
