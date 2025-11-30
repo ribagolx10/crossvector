@@ -1,5 +1,44 @@
 # CrossVector - Changelog
 
+## [0.1.3] - 2025-11-30
+
+### Testing Infrastructure
+- **Reorganized test structure** for better separation between unit and integration tests
+  - Moved real backend integration tests from `tests/searches/` to `scripts/tests/`
+  - Created `tests/mock/` with in-memory adapter for Query DSL unit testing
+  - Added comprehensive integration tests for all 4 backends (AstraDB, ChromaDB, Milvus, PgVector)
+  - Integration tests are opt-in and require real backend credentials
+
+### Query DSL Improvements
+- **Fixed Milvus operator mapping** - Changed `in`/`not in` to uppercase `IN`/`NOT IN` for compliance
+- **Improved test coverage** for Query DSL with mock backend tests
+- All backends now consistently support 8 universal operators: `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`
+
+### CI/CD
+- **Updated GitHub Actions workflow** to run only unit tests (`pytest tests/`)
+- Integration tests excluded from CI to avoid credential requirements
+- Added `integration` pytest marker for manual integration test execution
+- Fixed pytest fixture imports in mock tests
+
+### Documentation
+- **Updated README.md** with opt-in integration test documentation
+  - Added `scripts/tests/` usage examples
+  - Environment variable setup guide for all backends
+  - Static collection naming conventions (`test_crossvector`)
+- Documented test separation strategy and rationale
+
+### Bug Fixes
+- Fixed missing fixture imports causing 15 test errors in mock tests
+- Removed unused variable assignments in CRUD test methods
+- Resolved pre-commit hook failures (ruff formatting)
+
+## [0.1.2] - 2025-11-23
+
+### Refactor Design
+- Major refactoring and architecture improvements
+- Enhanced Query DSL design and implementation patterns
+- Improved adapter interface consistency across backends
+
 ## [0.1.1] - 2025-11-23
 
 - Bumped package version to **0.1.1**.
