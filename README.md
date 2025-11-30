@@ -616,6 +616,52 @@ settings.LOG_LEVEL = "DEBUG"
 ---
 
 ## Testing
+### Real Environment Tests (Opt-in)
+
+Integration tests that exercise real backends live under `scripts/tests/` to avoid running in GitHub Actions by default.
+
+- Location: `scripts/tests/`
+- Run manually when services/credentials are available
+
+Static defaults used in tests:
+- AstraDB collection: `test_crossvector`
+- Chroma collection: `test_crossvector`
+- Milvus collection: `test_crossvector`
+- PgVector table: `test_crossvector`
+
+Run examples:
+```zsh
+pytest scripts/tests -q
+pytest scripts/tests/test_pgvector.py -q
+```
+
+Environment setup examples:
+```zsh
+# OpenAI (embeddings)
+export OPENAI_API_KEY=sk-...
+export OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+
+# AstraDB
+export ASTRA_DB_APPLICATION_TOKEN=AstraCS:...
+export ASTRA_DB_API_ENDPOINT=https://...apps.astra.datastax.com
+
+# Chroma (local/cloud)
+export CHROMA_HOST=api.trychroma.com
+export CHROMA_API_KEY=ck-...
+export CHROMA_TENANT=...
+export CHROMA_DATABASE=Test
+
+# Milvus
+export MILVUS_API_ENDPOINT=http://localhost:19530
+export MILVUS_API_TOKEN=...
+
+# PgVector
+export PGVECTOR_HOST=localhost
+export PGVECTOR_PORT=5432
+export PGVECTOR_DBNAME=vectordb
+export PGVECTOR_USER=postgres
+export PGVECTOR_PASSWORD=postgres
+```
 
 Run tests with pytest:
 

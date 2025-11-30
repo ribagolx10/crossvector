@@ -50,8 +50,8 @@ class MilvusWhereCompiler(BaseWhere):
         "$gte": ">=",
         "$lt": "<",
         "$lte": "<=",
-        "$in": "in",
-        "$nin": "not in",
+        "$in": "IN",
+        "$nin": "NOT IN",
     }
 
     def to_where(self, where: Union[Dict[str, Any], Any]) -> str:

@@ -1,11 +1,7 @@
 """Integration tests for PgVector with Query DSL and VectorEngine.
 
-Tests common DSL operators with real PgVector backend to ensure:
-- Q objects compile correctly to PostgreSQL WHERE clauses
-- All 8 common operators work end-to-end
-- Nested JSONB metadata queries function properly
-- Numeric casting works for comparisons
-- Metadata-only search is supported
+Targets real PgVector. Configure using TEST_ env vars first,
+with static default table name.
 """
 
 import pytest
@@ -29,12 +25,13 @@ def pgvector_engine():
         engine = VectorEngine(
             embedding=embedding,
             db=db,
-            collection_name="test_querydsl_pgvector",
+            collection_name="test_crossvector",
+            store_text=True,
         )
 
         # Clean up before tests
         try:
-            engine.drop_collection("test_querydsl_pgvector")
+            engine.drop_collection("test_crossvector")
         except Exception:
             pass
 
@@ -42,14 +39,15 @@ def pgvector_engine():
         engine = VectorEngine(
             embedding=embedding,
             db=db,
-            collection_name="test_querydsl_pgvector",
+            collection_name="test_crossvector",
+            store_text=True,
         )
 
         yield engine
 
         # Cleanup after tests
         try:
-            engine.drop_collection("test_querydsl_pgvector")
+            engine.drop_collection("test_crossvector")
         except Exception:
             pass
 
@@ -80,12 +78,12 @@ def sample_docs(pgvector_engine):
         {"id": "doc5", "text": "Database design patterns", "metadata": {"category": "tech", "year": 2024, "score": 91}},
     ]
 
-    created = pgvector_engine.bulk_create(docs)
+    created = pgvector_engine.bulk_create(docs, ignore_conflicts=True, update_conflicts=True)
     return created
 
 
-class TestPgVectorQueryDSL:
-    """Test Query DSL with PgVector backend."""
+class TestPgVector:
+    """PgVector integration tests (search, filters, JSONB)."""
 
     def test_eq_operator(self, pgvector_engine, sample_docs):
         """Test $eq operator with Q object."""
@@ -249,3 +247,28 @@ class TestPgVectorQueryDSL:
 
         # Cleanup
         pgvector_engine.delete("jsonb1")
+
+    def test_crud_create_update_delete(self, pgvector_engine):
+        """Basic CRUD: create, update, get_or_create, update_or_create, delete."""
+        # Create
+        doc = pgvector_engine.create(text="CRUD doc", metadata={"owner": "tester", "tier": "bronze"})
+        assert doc.id
+
+        # Update
+        pgvector_engine.update({"id": doc.id}, text="CRUD doc updated", metadata={"tier": "silver"})
+        fetched = pgvector_engine.get(doc.id)
+        assert fetched.text == "CRUD doc updated"
+
+        # get_or_create existing
+        got, created = pgvector_engine.get_or_create({"id": doc.id}, defaults={"text": "should not change"})
+        assert not created and got.id == doc.id
+
+        # update_or_create new
+        uoc, created2 = pgvector_engine.update_or_create(
+            {"id": "crud-new-1"}, create_defaults={"text": "uoc created", "metadata": {"owner": "tester"}}
+        )
+        assert created2 and uoc.id == "crud-new-1"
+
+        # Delete
+        deleted = pgvector_engine.delete([doc.id, uoc.id])
+        assert deleted >= 0
