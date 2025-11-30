@@ -226,3 +226,64 @@ def apply_update_fields(item: Dict[str, Any], update_fields: Sequence[str] | Non
     """Filter item to only the update fields provided (excluding _id)."""
     fields = update_fields or [k for k in item.keys() if k != "_id"]
     return {k: item[k] for k in fields if k in item and k != "_id"}
+
+
+def flatten_metadata(metadata: Dict[str, Any], parent_key: str = "", sep: str = ".") -> Dict[str, Any]:
+    """Flatten nested metadata dictionary into dot-notation keys.
+
+    Chroma and some other vector DBs require flat metadata with primitive values.
+    This converts nested dicts like {"info": {"lang": "en"}} to {"info.lang": "en"}.
+
+    Args:
+        metadata: Nested metadata dictionary
+        parent_key: Parent key prefix (used in recursion)
+        sep: Separator for nested keys (default ".")
+
+    Returns:
+        Flattened metadata dictionary with dot-notation keys
+
+    Examples:
+        >>> flatten_metadata({"info": {"lang": "en", "tier": "gold"}})
+        {"info.lang": "en", "info.tier": "gold"}
+        >>> flatten_metadata({"tags": ["ml", "ai"], "score": 0.9})
+        {"tags": ["ml", "ai"], "score": 0.9}
+    """
+    items: List[tuple[str, Any]] = []
+    for k, v in metadata.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            # Recursively flatten nested dicts
+            items.extend(flatten_metadata(v, new_key, sep=sep).items())
+        else:
+            # Keep primitive values and lists as-is
+            items.append((new_key, v))
+    return dict(items)
+
+
+def unflatten_metadata(flat_metadata: Dict[str, Any], sep: str = ".") -> Dict[str, Any]:
+    """Unflatten dot-notation metadata back to nested structure.
+
+    Reverse operation of flatten_metadata. Converts {"info.lang": "en"} back to
+    {"info": {"lang": "en"}}.
+
+    Args:
+        flat_metadata: Flattened metadata with dot-notation keys
+        sep: Separator used in keys (default ".")
+
+    Returns:
+        Nested metadata dictionary
+
+    Examples:
+        >>> unflatten_metadata({"info.lang": "en", "info.tier": "gold"})
+        {"info": {"lang": "en", "tier": "gold"}}
+    """
+    result: Dict[str, Any] = {}
+    for key, value in flat_metadata.items():
+        parts = key.split(sep)
+        current = result
+        for part in parts[:-1]:
+            if part not in current:
+                current[part] = {}
+            current = current[part]
+        current[parts[-1]] = value
+    return result

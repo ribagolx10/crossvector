@@ -7,7 +7,10 @@ a convenient wrapper around the ABC interface with automatic embedding
 generation and flexible input handling.
 """
 
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Union
+
+if TYPE_CHECKING:
+    from crossvector.querydsl.q import Q
 
 from crossvector.settings import settings
 
@@ -95,6 +98,23 @@ class VectorEngine:
     def embedding(self) -> EmbeddingAdapter:
         """Access the embedding adapter instance."""
         return self._embedding
+
+    @property
+    def supports_vector_search(self) -> bool:
+        """Whether underlying adapter supports vector similarity search.
+
+        Falls back to True if adapter does not explicitly define the flag to avoid
+        accidental disabling of functionality for simple/mock adapters.
+        """
+        return bool(getattr(self.db, "supports_vector_search", True))
+
+    @property
+    def supports_metadata_only(self) -> bool:
+        """Whether underlying adapter supports metadata-only search (no vector).
+
+        Defaults to True for adapters that do not specify the capability.
+        """
+        return bool(getattr(self.db, "supports_metadata_only", True))
 
     # ------------------------------------------------------------------
     # Internal normalization helpers
@@ -331,31 +351,38 @@ class VectorEngine:
         vector: List[float] | None = None,
         metadata: Dict[str, Any] | None = None,
         defaults: Dict[str, Any] | None = None,
-        **kwargs: Any,
+        score_threshold: float = 0.9,
+        priority: list[str] = ["pk", "vector", "metadata"],
+        **kwargs,
     ) -> tuple[VectorDocument, bool]:
-        """Get existing document or create new one (Django-style pattern).
+        """
+        Get existing document or create new one, with multi-step lookup (pk, vector, metadata).
 
-        Attempts to retrieve a document by explicit ID or metadata filter.
-        If not found, creates a new document with optional default values.
-        Avoids embedding generation during lookup to reduce costs.
-
-        Resolution Strategy:
-            1. If explicit ID provided → try direct get by ID
-            2. If metadata provided → search by metadata (no vector)
-            3. If not found → create with defaults applied
+        Attempts lookup in order of priority:
+            1. PK (id)
+            2. Vector similarity (if supported)
+            3. Metadata-only (if supported)
+        If not found, creates new document with defaults.
 
         Args:
             doc: Document input (str | dict | VectorDocument | None)
             text: Optional text content
-            vector: Optional vector (used only if creating)
+            vector: Optional vector (used for similarity search)
             metadata: Optional metadata for lookup/creation
             defaults: Additional fields applied only when creating
+            score_threshold: Minimum similarity score for vector match
+            priority: List of lookup steps ("pk", "vector", "metadata")
             **kwargs: Extra metadata or id/_id/pk fields
 
         Returns:
             Tuple of (document, created) where created is True if new document
+
         Raises:
             MismatchError: If provided text mismatches existing text for same ID
+
+        Backend compatibility:
+            - Not all backends support vector or metadata-only search. Steps are skipped if unsupported.
+            - Example: AstraDB only supports PK and metadata, not vector similarity.
 
         Examples:
             >>> doc, created = engine.get_or_create("Hello", source="api")
@@ -366,47 +393,58 @@ class VectorEngine:
             ...     defaults={"priority": "high"}
             ... )
         """
-        # 1. Detect whether user explicitly provided an id before normalization
-        explicit_id: str | None = None
-        if isinstance(doc, VectorDocument) and doc.id:
-            explicit_id = doc.id
-        elif isinstance(doc, dict):
-            explicit_id = extract_pk(None, **doc)
-        elif isinstance(doc, (str, type(None))):
-            explicit_id = extract_pk(None, **kwargs)
-
-        # 2. Only attempt direct get if id was explicitly supplied (avoid using auto-generated id)
-        if explicit_id:
-            try:
-                existing = self.get(str(explicit_id))
-                return existing, False
-            except ValueError:
-                pass
-
-        # 3. Normalize using helper (may auto-generate id) without embedding generation
         doc = self._doc_rebuild(doc, text=text, vector=vector, metadata=metadata, **kwargs)
 
-        # 4. Search fallback by metadata only (no vector cost)
-        if doc.metadata:
-            # Query by metadata filter only (no vector embedding needed)
-            results = self.db.search(vector=None, limit=1, where=doc.metadata)
+        for step in priority:
+            if step == "pk" and doc.id:
+                try:
+                    existing = self.get(doc.id)
+                    if text and existing.text != text:
+                        raise MismatchError(
+                            "Text mismatch for PK",
+                            provided_text=text,
+                            existing_text=existing.text,
+                            document_id=existing.id,
+                        )
+                    return existing, False
+                except Exception:
+                    continue
 
-            if results:
-                existing = results[0]
-                # Validate text consistency if provided
-                if doc.text and existing.text and doc.text != existing.text:
-                    raise MismatchError(
-                        "Text content mismatch in get_or_create",
-                        provided_text=doc.text,
-                        existing_text=existing.text,
-                        document_id=existing.id,
-                    )
-                return existing, False
+            elif step == "vector" and vector:
+                if not self.supports_vector_search:
+                    continue
+                candidates = self.search(query=vector, limit=1, fields={"text", "metadata"})
+                if candidates:
+                    candidate = candidates[0]
+                    score_val = candidate.metadata.get("score", 1.0) if isinstance(candidate.metadata, dict) else 1.0
+                    if isinstance(score_val, (int, float)) and score_val >= score_threshold:
+                        return candidate, False
 
-        # 5. Creation path: apply defaults via copy_with
+            elif step == "metadata" and doc.metadata:
+                if not self.supports_metadata_only:
+                    continue
+                # Wrap primitive metadata values into universal operator form {field: {"$eq": value}}
+                lookup_metadata = {}
+                for mk, mv in doc.metadata.items():
+                    if isinstance(mv, dict):
+                        lookup_metadata[mk] = mv
+                    else:
+                        lookup_metadata[mk] = {"$eq": mv}
+                results = self.db.search(vector=None, limit=1, where=lookup_metadata)
+                if results:
+                    existing = results[0]
+                    if text and existing.text != text:
+                        raise MismatchError(
+                            "Text mismatch for metadata lookup",
+                            provided_text=text,
+                            existing_text=existing.text,
+                            document_id=existing.id,
+                        )
+                    return existing, False
+
+        # Create new doc
         if defaults:
             doc = doc.copy_with(**defaults)
-
         return self.create(doc), True
 
     def update_or_create(
@@ -420,10 +458,11 @@ class VectorEngine:
         create_defaults: Dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> tuple[VectorDocument, bool]:
-        """Update existing document or create new one (Django-style pattern).
+        """
+        Update an existing document by ID, or create new one if not found.
 
-        Attempts to update a document by ID. If not found, creates a new document.
-        Supports separate defaults for both paths and create-only defaults.
+        Cross-engine safe: only updates by PK. Creation applies both defaults and create_defaults.
+        Checks for text mismatch after update.
 
         Args:
             doc: Document input (must include id field)
@@ -439,6 +478,11 @@ class VectorEngine:
 
         Raises:
             MissingFieldError: If no ID provided in doc or kwargs
+            MismatchError: If text mismatch after update
+
+        Backend compatibility:
+            - Only PK-based update is supported for all backends.
+            - Creation path applies all defaults and create_defaults.
 
         Examples:
             >>> doc, created = engine.update_or_create(
@@ -450,30 +494,39 @@ class VectorEngine:
             ...     create_defaults={"created_at": "2024-01-01"}
             ... )
         """
-        # Normalize using helper
+        # Normalize doc and extract ID
         doc = self._doc_rebuild(doc, text=text, vector=vector, metadata=metadata, **kwargs)
 
-        if doc.id is None:
+        if not doc.id:
             raise MissingFieldError("Cannot update_or_create without id", field="id", operation="update_or_create")
 
         # Try update path
         try:
+            # Apply defaults to both update and create paths
             if defaults:
                 doc = doc.copy_with(**defaults)
-            return self.update(doc), False
+            updated_doc = self.update(doc)
+            return updated_doc, False
         except CrossVectorError:
+            # Document not found → fallback to create
             pass
 
-        # Create path: merge defaults + create_defaults
-        if defaults or create_defaults:
-            merged: Dict[str, Any] = {}
-            if defaults:
-                merged.update(defaults)
-            if create_defaults:
-                merged.update(create_defaults)
-            doc = doc.copy_with(**merged)
+        # Merge defaults + create_defaults for creation
+        merged_defaults: Dict[str, Any] = {}
+        if defaults:
+            merged_defaults.update(defaults)
+        if create_defaults:
+            merged_defaults.update(create_defaults)
+        if merged_defaults:
+            doc = doc.copy_with(**merged_defaults)
 
-        return self.create(doc), True
+        # Ensure vector exists before create
+        if not doc.vector and doc.text:
+            doc.vector = self.embedding.get_embeddings([doc.text])[0]
+
+        # Create new document
+        new_doc = self.create(doc)
+        return new_doc, bool(create_defaults)
 
     # ------------------------------------------------------------------
     # Batch operations
@@ -579,19 +632,20 @@ class VectorEngine:
         query: Union[str, List[float], None] = None,
         limit: int | None = None,
         offset: int = 0,
-        where: Dict[str, Any] | None = None,
+        where: Union[Dict[str, Any], "Q", None] = None,
         fields: Set[str] | None = None,
     ) -> List[VectorDocument]:
-        """Search for similar documents by text query or vector.
+        """Search for similar documents by text query, vector, or metadata/Q object.
 
         Performs semantic search using vector similarity. Automatically generates
         embeddings for text queries. Supports metadata filtering and field projection.
+        Accepts universal dict or Q object for `where` argument.
 
         Args:
             query: Search query (str for text, List[float] for vector, None for metadata-only)
             limit: Maximum number of results (default from settings)
             offset: Number of results to skip
-            where: Metadata filter conditions (dict)
+            where: Metadata filter conditions (dict or Q object)
             fields: Set of fields to include in results
 
         Returns:
@@ -603,6 +657,7 @@ class VectorEngine:
             ...     "AI trends",
             ...     where={"category": "tech", "year": 2024}
             ... )
+            >>> results = engine.search(where=Q(category="tech", year=2024))
             >>> results = engine.search(where={"status": "active"})  # metadata-only
         """
         vector = None
@@ -610,7 +665,14 @@ class VectorEngine:
             vector = self.embedding.get_embeddings([query])[0]
         elif isinstance(query, list):
             vector = query
-        # If query is None, do metadata-only search
+        else:
+            # Metadata-only search (query is None)
+            if not self.supports_metadata_only:
+                raise InvalidFieldError(
+                    "Adapter does not support metadata-only search; vector is required",
+                    field="vector",
+                    operation="search",
+                )
 
         # Use default limit from settings if not provided
         if limit is None:

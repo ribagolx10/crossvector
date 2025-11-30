@@ -70,8 +70,8 @@ def astradb_credentials():
 def chromadb_cloud_credentials():
     """ChromaDB Cloud credentials from environment."""
     api_key = os.getenv("CHROMA_API_KEY")
-    tenant = os.getenv("CHROMA_CLOUD_TENANT")
-    database = os.getenv("CHROMA_CLOUD_DATABASE")
+    tenant = os.getenv("CHROMA_TENANT")
+    database = os.getenv("CHROMA_DATABASE")
     if not api_key:
         pytest.skip("ChromaDB credentials not set")
     return {"api_key": api_key, "tenant": tenant, "database": database}

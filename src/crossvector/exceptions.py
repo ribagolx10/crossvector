@@ -199,3 +199,12 @@ class DependencyError(CrossVectorError):
     Example:
         >>> raise DependencyError("Required package not installed", package="google-genai", install_cmd="pip install google-genai")
     """
+
+
+# Database exceptions
+class DatabaseNotFoundError(ConnectionError):
+    """Raised specifically when the target database is missing.
+
+    Example:
+        >>> raise DatabaseNotFoundError("Database does not exist", database="vector_db", adapter="PGVector")
+    """

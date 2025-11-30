@@ -11,6 +11,7 @@ Key Features:
     - Automatic collection management and schema creation
 """
 
+import math
 from typing import Any, Dict, List, Set
 
 from astrapy import DataAPIClient
@@ -35,6 +36,7 @@ from crossvector.exceptions import (
     MultipleObjectsReturned,
     SearchError,
 )
+from crossvector.querydsl.compilers.astradb import AstraDBWhereCompiler, astradb_where
 from crossvector.schema import VectorDocument
 from crossvector.settings import settings as api_settings
 from crossvector.types import DocIds
@@ -42,7 +44,6 @@ from crossvector.utils import (
     apply_update_fields,
     chunk_iter,
     extract_pk,
-    normalize_pks,
     prepare_item_for_storage,
 )
 
@@ -62,6 +63,8 @@ class AstraDBAdapter(VectorDBAdapter):
     """
 
     use_dollar_vector: bool = True
+    where_compiler: AstraDBWhereCompiler = astradb_where
+    supports_metadata_only: bool = True  # Allow metadata-only filtering without vector
 
     def __init__(self, **kwargs: Any):
         """Initialize the AstraDB adapter with lazy client setup.
@@ -322,6 +325,37 @@ class AstraDBAdapter(VectorDBAdapter):
     # Search Operations
     # ------------------------------------------------------------------
 
+    def _compute_similarity(self, query_vector: List[float], result_vector: List[float]) -> float | None:
+        """Private helper to compute cosine similarity between two vectors.
+
+        Returns None on any error or if vectors are empty / length mismatch.
+        """
+        try:
+            if not query_vector or not result_vector:
+                return None
+            # Length guard (Astra should enforce uniform dimensions)
+            if len(query_vector) != len(result_vector):
+                return None
+            # Compute norms
+            q_norm_sq = 0.0
+            r_norm_sq = 0.0
+            dot = 0.0
+            for q, r in zip(query_vector, result_vector):
+                q_norm_sq += q * q
+                r_norm_sq += r * r
+                dot += q * r
+            if q_norm_sq <= 0.0 or r_norm_sq <= 0.0:
+                return None
+            similarity = dot / (math.sqrt(q_norm_sq) * math.sqrt(r_norm_sq))
+            # Clamp minor floating drift
+            if similarity > 1.0:
+                similarity = 1.0
+            elif similarity < -1.0:
+                similarity = -1.0
+            return similarity
+        except Exception:
+            return None
+
     def search(
         self,
         vector: List[float] | None = None,
@@ -351,14 +385,18 @@ class AstraDBAdapter(VectorDBAdapter):
         if limit is None:
             limit = api_settings.VECTOR_SEARCH_LIMIT
 
-        try:
-            # Construct projection to exclude vector by default
-            projection = {"$vector": 0}
-            if fields:
-                projection = {field: 1 for field in fields}
+        # Build filter query
+        if where is not None:
+            # Compiler handles both Q objects and dicts
+            where = self.where_compiler.to_where(where)
 
-            # Build filter query
-            filter_query = where if where else {}
+        try:
+            # Projection rules:
+            # - If performing vector search, include '$vector' to allow VectorDocument creation.
+            # - If metadata-only search, we can exclude vector for efficiency and inject empty list.
+            projection = None
+            if fields and vector is not None:
+                projection = {field: 1 for field in fields}
 
             # AstraDB doesn't have native skip, so we fetch limit+offset and slice
             fetch_limit = limit + offset
@@ -367,7 +405,7 @@ class AstraDBAdapter(VectorDBAdapter):
                 # Metadata-only search (no vector sorting)
                 results = list(
                     self.collection.find(
-                        filter=filter_query,
+                        filter=where,
                         limit=fetch_limit,
                         projection=projection,
                     )
@@ -376,7 +414,7 @@ class AstraDBAdapter(VectorDBAdapter):
                 # Vector search with sorting
                 results = list(
                     self.collection.find(
-                        filter=filter_query,
+                        filter=where,
                         sort={"$vector": vector},
                         limit=fetch_limit,
                         projection=projection,
@@ -386,13 +424,76 @@ class AstraDBAdapter(VectorDBAdapter):
             # Apply offset by slicing
             results = results[offset:]
 
-            # Convert to VectorDocument instances
-            documents = [VectorDocument.from_kwargs(**doc) for doc in results]
-            self.logger.message(f"Vector search returned {len(documents)} results.")
-            return documents
+            # Build map of full documents to restore metadata fields lost due to projection.
+            # We only need this when we didn't explicitly request fields beyond vector/text.
+            # Always fetch full docs so we can reconstruct metadata accurately (small result sets).
+            ids: List[str] = [r.get("_id") for r in results if r.get("_id")]
+            full_docs: List[Dict[str, Any]] = []
+            full_map: Dict[str, Dict[str, Any]] = {}
+            if ids:
+                try:
+                    full_docs = list(self.collection.find({"_id": {"$in": ids}}, limit=len(ids)))
+                    for fd in full_docs:
+                        _id = fd.get("_id")
+                        if _id:
+                            full_map[_id] = fd
+                except Exception:
+                    # Non-critical; fallback to projected docs
+                    pass
+
+            prepared_docs: List[VectorDocument] = []
+            reserved: Set[str] = {"_id", "id", "pk", "text", "$vector", "vector"}
+
+            # Query vector reference for similarity scoring (None for metadata-only searches)
+            query_vector = vector if vector is not None else None
+
+            for doc in results:
+                _id = doc.get("_id")
+                # Normalize vector field
+                if "$vector" in doc:
+                    vec = doc["$vector"]
+                elif "vector" in doc:
+                    vec = doc["vector"]
+                else:
+                    vec = []  # metadata-only path (no vector returned)
+                    if query_vector:
+                        self.logger.warning("AstraDB search missing vector for id=%s; similarity skipped", _id)
+
+                # Restore full document metadata if available
+                full_doc = full_map.get(_id, {}) if _id else {}
+                metadata_block: Dict[str, Any] = {}
+
+                # Merge explicit 'metadata' nested dict first (if adapter later stores it)
+                if isinstance(full_doc.get("metadata"), dict):
+                    for k, v in full_doc["metadata"].items():
+                        metadata_block[k] = v
+
+                # Include top-level metadata keys not in reserved set
+                for k, v in full_doc.items():
+                    if k not in reserved and k != "metadata":
+                        metadata_block.setdefault(k, v)
+
+                # Similarity score injection using helper
+                if query_vector and vec and isinstance(vec, list):
+                    similarity = self._compute_similarity(query_vector, vec)
+                    if similarity is not None and "score" not in metadata_block:
+                        metadata_block["score"] = similarity
+                        self.logger.message("AstraDB similarity computed id=%s score=%.6f", _id, similarity)
+
+                doc_dict: Dict[str, Any] = {"_id": _id, "vector": vec, "metadata": metadata_block}
+
+                # Prefer text from projected doc, fallback to full_doc
+                text_val = doc.get("text") or full_doc.get("text")
+                if text_val is not None:
+                    doc_dict["text"] = text_val
+
+                prepared_docs.append(VectorDocument.from_kwargs(**doc_dict))
+
+            self.logger.message(f"Vector search returned {len(prepared_docs)} results.")
+            return prepared_docs
         except Exception as e:
             self.logger.error(f"Vector search failed: {e}", exc_info=True)
-            raise
+            raise SearchError(f"AstraDB search failed: {e}") from e
 
     # ------------------------------------------------------------------
     # CRUD Operations
@@ -422,12 +523,23 @@ class AstraDBAdapter(VectorDBAdapter):
 
         # Priority 1: Direct pk lookup
         if doc_id:
-            results = list(self.collection.find({"_id": doc_id}, limit=2))
+            results = list(
+                self.collection.find(
+                    {"_id": doc_id},
+                    limit=2,
+                    projection={"$vector": 1, "_id": 1, "text": 1, "metadata": 1},
+                )
+            )
             if not results:
                 raise DoesNotExist(f"Document with ID '{doc_id}' not found")
             if len(results) > 1:
                 raise MultipleObjectsReturned(f"Multiple documents found with ID '{doc_id}'")
-            return VectorDocument.from_kwargs(**results[0])
+            raw = results[0]
+            if "$vector" in raw:
+                raw["vector"] = raw["$vector"]
+            else:
+                raw["vector"] = []
+            return VectorDocument.from_kwargs(**raw)
 
         # Priority 2: Search by metadata kwargs using search method
         metadata_kwargs = {k: v for k, v in kwargs.items() if k not in ("pk", "id", "_id")}
@@ -508,7 +620,10 @@ class AstraDBAdapter(VectorDBAdapter):
             self.collection.update_one({"_id": pk}, {"$set": update_doc})
             self.logger.message(f"Updated document with id '{pk}'.")
 
-        refreshed = self.collection.find_one({"_id": pk})
+        refreshed = self.collection.find_one({"_id": pk}, projection={"$vector": 1, "_id": 1, "text": 1, "metadata": 1})
+        # Convert $vector to vector for VectorDocument
+        if "$vector" in refreshed:
+            refreshed["vector"] = refreshed.pop("$vector")
         return VectorDocument.from_kwargs(**refreshed)
 
     def delete(self, ids: DocIds) -> int:
@@ -526,7 +641,12 @@ class AstraDBAdapter(VectorDBAdapter):
         if not self.collection:
             raise CollectionNotInitializedError("Collection is not initialized", operation="delete", adapter="AstraDB")
 
-        pks = normalize_pks(ids)
+        # Convert single ID to list
+        if isinstance(ids, (str, int)):
+            pks = [ids]
+        else:
+            pks = list(ids) if ids else []
+
         if not pks:
             return 0
 

@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Sequence, Set, Union
 
 from crossvector import VectorEngine
 from crossvector.abc import EmbeddingAdapter, VectorDBAdapter
+from crossvector.exceptions import CrossVectorError
 from crossvector.schema import VectorDocument
 
 
@@ -19,8 +20,13 @@ class MockEmbeddingAdapter(EmbeddingAdapter):
         return self._dimension
 
     def get_embeddings(self, texts):
-        # Return mock embeddings (simple normalized vectors)
-        return [[0.5] * self._dimension for _ in texts]
+        # Deterministic per-text embedding (value derived from text ord sums)
+        vectors = []
+        for t in texts:
+            seed = sum(ord(c) for c in t) % 100
+            base = (seed / 100.0) or 0.01
+            vectors.append([base] * self._dimension)
+        return vectors
 
 
 class MockDBAdapter(VectorDBAdapter):
@@ -152,7 +158,7 @@ class MockDBAdapter(VectorDBAdapter):
 
     def update(self, document: VectorDocument) -> VectorDocument:
         if document.pk not in self.documents:
-            raise ValueError(f"Document with pk {document.pk} not found")
+            raise CrossVectorError(f"Document with pk {document.pk} not found")
         doc_dict = document.to_storage_dict(store_text=self.store_text, use_dollar_vector=True)
         self.documents[document.pk].update(doc_dict)
         return document
@@ -378,3 +384,63 @@ class TestVectorEngine:
         # Verify pk was generated
         assert isinstance(docs[0].pk, str)
         assert len(docs[0].pk) > 0
+
+    def test_create_single_document(self):
+        embedding = MockEmbeddingAdapter()
+        db = MockDBAdapter()
+        engine = VectorEngine(embedding=embedding, db=db, collection_name="test_collection")
+        doc = engine.create("Simple text document")
+        assert doc.pk in db.documents
+        assert doc.vector and len(doc.vector) == embedding.embedding_dimension
+
+    def test_update_document_regenerates_embedding(self):
+        embedding = MockEmbeddingAdapter()
+        db = MockDBAdapter()
+        engine = VectorEngine(embedding=embedding, db=db, collection_name="test_collection")
+        original = engine.create({"id": "doc-upd", "text": "First version"})
+        original_vector = original.vector.copy()
+        updated = engine.update({"id": "doc-upd"}, text="Second version")
+        assert updated.pk == original.pk
+        assert updated.text == "Second version"
+        assert updated.vector != original_vector  # different seed value expected
+
+    def test_get_or_create_creates_new(self):
+        embedding = MockEmbeddingAdapter()
+        db = MockDBAdapter()
+        db.supports_vector_search = True
+        db.supports_metadata_only = True
+        engine = VectorEngine(embedding=embedding, db=db, collection_name="test_collection")
+        doc, created = engine.get_or_create("Hello world", metadata={"lang": "en"})
+        assert created is True
+        assert doc.pk in db.documents
+
+    def test_get_or_create_returns_existing_by_pk(self):
+        embedding = MockEmbeddingAdapter()
+        db = MockDBAdapter()
+        engine = VectorEngine(embedding=embedding, db=db, collection_name="test_collection")
+        first = engine.create({"id": "pk-1", "text": "Alpha text"})
+        second, created = engine.get_or_create({"id": "pk-1", "text": "Alpha text"})
+        assert created is False
+        assert second.pk == first.pk
+
+    def test_update_or_create_updates_existing(self):
+        embedding = MockEmbeddingAdapter()
+        db = MockDBAdapter()
+        engine = VectorEngine(embedding=embedding, db=db, collection_name="test_collection")
+        updated, created = engine.update_or_create(
+            {"id": "doc-x"}, text="Version B", defaults={"metadata": {"tier": "gold"}}
+        )
+        assert created is False
+        assert updated.text == "Version B"
+        assert db.documents[updated.pk]["tier"] == "gold"
+
+    def test_update_or_create_creates_new(self):
+        embedding = MockEmbeddingAdapter()
+        db = MockDBAdapter()
+        engine = VectorEngine(embedding=embedding, db=db, collection_name="test_collection")
+        doc, created = engine.update_or_create(
+            {"id": "new-doc", "text": "Brand new"}, create_defaults={"metadata": {"owner": "tester"}}
+        )
+        assert created is True
+        stored = db.documents[doc.pk]
+        assert stored.get("owner") == "tester"

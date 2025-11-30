@@ -32,18 +32,18 @@ from crossvector.exceptions import (
     MultipleObjectsReturned,
     SearchError,
 )
+from crossvector.querydsl.compilers.milvus import MilvusWhereCompiler, milvus_where
 from crossvector.schema import VectorDocument
 from crossvector.settings import settings as api_settings
 from crossvector.types import DocIds
 from crossvector.utils import (
     apply_update_fields,
     extract_pk,
-    normalize_pks,
     prepare_item_for_storage,
 )
 
 
-class MilvusDBAdapter(VectorDBAdapter):
+class MilvusAdapter(VectorDBAdapter):
     """Vector database adapter for Milvus.
 
     Provides a high-level interface for vector operations using Milvus's
@@ -57,6 +57,9 @@ class MilvusDBAdapter(VectorDBAdapter):
     """
 
     use_dollar_vector: bool = False
+    where_compiler: MilvusWhereCompiler = milvus_where
+    # Capability flags: Milvus requires vector for similarity search; metadata-only search disabled
+    supports_metadata_only: bool = False
 
     def __init__(self, **kwargs: Any):
         """Initialize the Milvus adapter with lazy client setup.
@@ -64,7 +67,7 @@ class MilvusDBAdapter(VectorDBAdapter):
         Args:
             **kwargs: Additional configuration options (currently unused)
         """
-        super(MilvusDBAdapter, self).__init__(**kwargs)
+        super(MilvusAdapter, self).__init__(**kwargs)
         self._client: MilvusClient | None = None
         self.collection_name: str | None = None
         self.embedding_dimension: int | None = None
@@ -87,12 +90,10 @@ class MilvusDBAdapter(VectorDBAdapter):
                     config_key="MILVUS_API_ENDPOINT",
                     env_file=".env",
                 )
-            user = api_settings.MILVUS_USER
-            password = api_settings.MILVUS_PASSWORD
-            token = None
-            if user and password:
-                token = f"{user}:{password}"
-            self._client = MilvusClient(uri=uri, token=token)
+            if api_settings.MILVUS_API_KEY:
+                self._client = MilvusClient(uri=uri, token=api_settings.MILVUS_API_KEY)
+            else:
+                self._client = MilvusClient(uri=uri)
             self.logger.message(f"MilvusClient initialized with uri={uri}")
         return self._client
 
@@ -420,37 +421,19 @@ class MilvusDBAdapter(VectorDBAdapter):
                 output_fields.append("text")
 
         # Build metadata filter expression if where is provided
-        filter_expr = None
-        if where:
-            # Convert dict to Milvus filter expression: metadata["key"] == "value"
-            conditions = [f'metadata["{k}"] == "{v}"' for k, v in where.items()]
-            filter_expr = " and ".join(conditions)
+        if where is not None:
+            # Compiler handles both Q objects and dicts
+            where = self.where_compiler.to_where(where)
 
         # Milvus fetch with offset: get limit+offset
         fetch_limit = limit + offset
 
         if vector is None:
-            # Metadata-only query using query API
-            if not filter_expr:
-                raise SearchError(
-                    "Either vector or where filter required for search", reason="both vector and where are missing"
-                )
-            results = self.client.query(
-                collection_name=self.collection_name,
-                filter=filter_expr,
-                output_fields=output_fields,
-                limit=fetch_limit,
+            # Milvus adapter does not support pure metadata-only search via engine abstraction.
+            raise SearchError(
+                "Vector is required for Milvus search (metadata-only disabled)",
+                reason="vector_missing",
             )
-            # Apply offset
-            results = results[offset:] if results else []
-            vector_docs = []
-            for hit in results:
-                doc_dict = {"_id": hit.get("id"), "metadata": hit.get("metadata", {})}
-                if "text" in hit:
-                    doc_dict["text"] = hit["text"]
-                vector_docs.append(VectorDocument.from_kwargs(**doc_dict))
-            self.logger.message(f"Search returned {len(vector_docs)} results.")
-            return vector_docs
 
         # Vector search path
         results = self.client.search(
@@ -458,7 +441,7 @@ class MilvusDBAdapter(VectorDBAdapter):
             data=[vector],
             limit=fetch_limit,
             output_fields=output_fields,
-            filter=filter_expr,
+            filter=where,
         )
 
         # MilvusClient returns list of lists, apply offset
@@ -467,7 +450,16 @@ class MilvusDBAdapter(VectorDBAdapter):
         # Convert to VectorDocument instances
         vector_docs = []
         for hit in hits:
-            doc_dict = {"_id": hit.get("id"), "metadata": hit.get("metadata", {})}
+            # Milvus search returns distance; embed a synthetic score if absent
+            score_val = 1.0
+            distance = hit.get("distance") or hit.get("score")
+            if isinstance(distance, (int, float)):
+                # Use inverse distance heuristic if cosine metric (distance range assumption) else raw
+                score_val = 1.0 - distance if 0.0 <= distance <= 1.0 else float(distance)
+            metadata_block = hit.get("metadata", {}) or {}
+            if isinstance(metadata_block, dict) and "score" not in metadata_block:
+                metadata_block["score"] = score_val
+            doc_dict = {"_id": hit.get("id"), "vector": [], "metadata": metadata_block}
             if "text" in hit:
                 doc_dict["text"] = hit["text"]
             vector_docs.append(VectorDocument.from_kwargs(**doc_dict))
@@ -549,6 +541,9 @@ class MilvusDBAdapter(VectorDBAdapter):
         if vector is None:
             raise InvalidFieldError("Vector is required", field="vector", operation="create")
 
+        # Load collection before conflict check
+        self.client.load_collection(collection_name=self.collection_name)
+
         # Conflict check
         existing = self.client.get(collection_name=self.collection_name, ids=[pk])
         if existing:
@@ -566,7 +561,7 @@ class MilvusDBAdapter(VectorDBAdapter):
             data["text"] = text_val
 
         self.client.upsert(collection_name=self.collection_name, data=[data])
-        self.logger.message(f"Created document with id '{pk}'.")
+        self.logger.message(f"Created document with id '{pk}'.\")")
         return doc
 
     def update(self, doc: VectorDocument, **kwargs) -> VectorDocument:
@@ -642,7 +637,12 @@ class MilvusDBAdapter(VectorDBAdapter):
         if not self.collection_name:
             raise CollectionNotInitializedError("Collection is not initialized", operation="delete", adapter="Milvus")
 
-        pks = normalize_pks(ids)
+        # Convert single ID to list
+        if isinstance(ids, (str, int)):
+            pks = [ids]
+        else:
+            pks = list(ids) if ids else []
+
         if not pks:
             return 0
 
@@ -685,6 +685,9 @@ class MilvusDBAdapter(VectorDBAdapter):
             )
         if not docs:
             return []
+
+        # Load collection before any operations
+        self.client.load_collection(collection_name=self.collection_name)
 
         dataset: List[Dict[str, Any]] = []
         created_docs: List[VectorDocument] = []
@@ -842,6 +845,8 @@ class MilvusDBAdapter(VectorDBAdapter):
         # Flush remaining batch
         if batch_buffer:
             self.client.upsert(collection_name=self.collection_name, data=batch_buffer)
+        # Load collection to make data queryable
+        self.client.load_collection(collection_name=self.collection_name)
 
         self.logger.message(f"Bulk updated {len(updated_docs)} document(s).")
         return updated_docs
@@ -890,6 +895,8 @@ class MilvusDBAdapter(VectorDBAdapter):
                 self.client.upsert(collection_name=self.collection_name, data=data[i : i + batch_size])
         else:
             self.client.upsert(collection_name=self.collection_name, data=data)
+        # Load collection to make data queryable
+        self.client.load_collection(collection_name=self.collection_name)
 
         self.logger.message(f"Upserted {len(docs)} document(s).")
         return docs

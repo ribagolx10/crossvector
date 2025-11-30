@@ -26,7 +26,7 @@ class TestGeminiEmbeddingAdapter:
         with patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}):
             adapter = GeminiEmbeddingAdapter()
             assert adapter.model_name == "models/gemini-embedding-001"
-            assert adapter.embedding_dimension == 768
+            assert adapter.embedding_dimension == 1536
             assert adapter.task_type == "retrieval_document"
 
     def test_initialization_custom_model(self):
@@ -40,30 +40,30 @@ class TestGeminiEmbeddingAdapter:
         """Test valid dynamic dimensionality for gemini-embedding-001."""
         with patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}):
             # Test 768
-            adapter = GeminiEmbeddingAdapter(model_name="gemini-embedding-001", output_dimensionality=768)
+            adapter = GeminiEmbeddingAdapter(model_name="gemini-embedding-001", dim=768)
             assert adapter.embedding_dimension == 768
 
             # Test 1536
-            adapter = GeminiEmbeddingAdapter(model_name="gemini-embedding-001", output_dimensionality=1536)
+            adapter = GeminiEmbeddingAdapter(model_name="gemini-embedding-001", dim=1536)
             assert adapter.embedding_dimension == 1536
 
             # Test 3072
-            adapter = GeminiEmbeddingAdapter(model_name="gemini-embedding-001", output_dimensionality=3072)
+            adapter = GeminiEmbeddingAdapter(model_name="gemini-embedding-001", dim=3072)
             assert adapter.embedding_dimension == 3072
 
     def test_dynamic_dimensionality_invalid(self):
         """Test invalid dynamic dimensionality raises error."""
         with patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}):
-            with pytest.raises(InvalidFieldError, match="Invalid output_dimensionality"):
+            with pytest.raises(InvalidFieldError, match="Invalid dim"):
                 GeminiEmbeddingAdapter(
                     model_name="gemini-embedding-001",
-                    output_dimensionality=1024,  # Invalid
+                    dim=1024,  # Invalid
                 )
 
     def test_dynamic_dimensionality_ignored_for_other_models(self):
         """Test dynamic dimensionality is ignored for other models."""
         with patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}):
-            adapter = GeminiEmbeddingAdapter(model_name="text-embedding-004", output_dimensionality=1536)
+            adapter = GeminiEmbeddingAdapter(model_name="text-embedding-004", dim=1536)
             # Should fallback to default 768
             assert adapter.embedding_dimension == 768
 
@@ -105,7 +105,7 @@ class TestGeminiEmbeddingAdapter:
                 assert call_args.kwargs["contents"] == "hello world"
 
     def test_get_embeddings_with_dimensionality(self):
-        """Test get_embeddings passes output_dimensionality to API."""
+        """Test get_embeddings passes dim to API."""
         with patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}):
             # Mock types
             mock_types = MagicMock()
@@ -116,7 +116,7 @@ class TestGeminiEmbeddingAdapter:
                 "sys.modules",
                 {"google": MagicMock(), "google.genai": mock_genai_module, "google.genai.types": mock_types},
             ):
-                adapter = GeminiEmbeddingAdapter(output_dimensionality=1536)
+                adapter = GeminiEmbeddingAdapter(dim=1536)
 
                 # Create a fresh mock for the client
                 mock_client = MagicMock()
@@ -138,6 +138,4 @@ class TestGeminiEmbeddingAdapter:
                 mock_client.models.embed_content.assert_called_once()
 
                 # Check if config was created with correct params
-                mock_types.EmbedContentConfig.assert_called_with(
-                    task_type="retrieval_document", output_dimensionality=1536
-                )
+                mock_types.EmbedContentConfig.assert_called_with(task_type="retrieval_document", dim=1536)

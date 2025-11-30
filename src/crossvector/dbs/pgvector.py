@@ -24,26 +24,29 @@ from crossvector.exceptions import (
     CollectionExistsError,
     CollectionNotFoundError,
     CollectionNotInitializedError,
+    ConnectionError,
+    DatabaseNotFoundError,
     DocumentExistsError,
     DocumentNotFoundError,
     DoesNotExist,
     InvalidFieldError,
+    MissingConfigError,
     MissingDocumentError,
     MissingFieldError,
     MultipleObjectsReturned,
 )
+from crossvector.querydsl.compilers.pgvector import PgVectorWhereCompiler, pgvector_where
 from crossvector.schema import VectorDocument
 from crossvector.settings import settings as api_settings
 from crossvector.types import DocIds
 from crossvector.utils import (
     apply_update_fields,
     extract_pk,
-    normalize_pks,
     prepare_item_for_storage,
 )
 
 
-class PGVectorAdapter(VectorDBAdapter):
+class PgVectorAdapter(VectorDBAdapter):
     """Vector database adapter for PostgreSQL with pgvector extension.
 
     Provides a high-level interface for vector operations using PostgreSQL's
@@ -57,6 +60,8 @@ class PGVectorAdapter(VectorDBAdapter):
     """
 
     use_dollar_vector: bool = False
+    where_compiler: PgVectorWhereCompiler = pgvector_where
+    supports_metadata_only: bool = True  # PGVector supports JSONB filtering without vector
 
     def __init__(self, **kwargs: Any):
         """Initialize the PGVector adapter with lazy connection setup.
@@ -64,7 +69,7 @@ class PGVectorAdapter(VectorDBAdapter):
         Args:
             **kwargs: Additional configuration options (currently unused)
         """
-        super(PGVectorAdapter, self).__init__(**kwargs)
+        super(PgVectorAdapter, self).__init__(**kwargs)
         self._conn = None
         self._cursor = None
         self.collection_name: str | None = None
@@ -81,14 +86,81 @@ class PGVectorAdapter(VectorDBAdapter):
             psycopg2.Error: If connection fails
         """
         if self._conn is None:
-            self._conn = psycopg2.connect(
-                dbname=api_settings.PGVECTOR_DBNAME or "postgres",
-                user=api_settings.PGVECTOR_USER or "postgres",
-                password=api_settings.PGVECTOR_PASSWORD or "postgres",
-                host=api_settings.PGVECTOR_HOST or "localhost",
-                port=api_settings.PGVECTOR_PORT or "5432",
-            )
-            self.logger.message("PostgreSQL connection established.")
+            # Require explicit PGVECTOR_DBNAME; avoid falling back to system 'postgres'
+            target_db = api_settings.PGVECTOR_DBNAME
+            if not target_db:
+                raise MissingConfigError(
+                    "PGVECTOR_DBNAME is not set. Set it via environment variable or .env file (e.g. PGVECTOR_DBNAME=vector_db). Refusing to use system 'postgres' database to avoid accidental writes.",
+                    config_key="PGVECTOR_DBNAME",
+                    adapter="PGVector",
+                    hint="Add PGVECTOR_DBNAME to your .env then reinitialize the engine.",
+                )
+            user = api_settings.PGVECTOR_USER or "postgres"
+            password = api_settings.PGVECTOR_PASSWORD or "postgres"
+            host = api_settings.PGVECTOR_HOST or "localhost"
+            port = api_settings.PGVECTOR_PORT or "5432"
+            try:
+                self._conn = psycopg2.connect(
+                    dbname=target_db,
+                    user=user,
+                    password=password,
+                    host=host,
+                    port=port,
+                )
+                self.logger.message("PostgreSQL connection established (db=%s).", target_db)
+            except psycopg2.OperationalError as e:
+                msg = str(e)
+                if "does not exist" in msg and target_db:
+                    # Attempt automatic database creation using maintenance 'postgres'
+                    self.logger.message("Database '%s' missing. Attempting creation...", target_db)
+                    try:
+                        admin_conn = psycopg2.connect(
+                            dbname="postgres",
+                            user=user,
+                            password=password,
+                            host=host,
+                            port=port,
+                        )
+                        admin_conn.autocommit = True
+                        cur = admin_conn.cursor()
+                        try:
+                            cur.execute(f"CREATE DATABASE {target_db}")
+                            self.logger.message("Database '%s' created successfully.", target_db)
+                        finally:
+                            cur.close()
+                            admin_conn.close()
+                        # Re-attempt connection to newly created database
+                        self._conn = psycopg2.connect(
+                            dbname=target_db,
+                            user=user,
+                            password=password,
+                            host=host,
+                            port=port,
+                        )
+                        self.logger.message("PostgreSQL connection established after creation (db=%s).", target_db)
+                    except Exception as ce:
+                        # Surface a more specific error if creation failed
+                        raise DatabaseNotFoundError(
+                            "Could not auto-create database. Ensure the role has CREATEDB privilege or create it manually: CREATE DATABASE {target_db};",
+                            database=target_db,
+                            adapter="PGVector",
+                            user=user,
+                            host=host,
+                            port=port,
+                            original_error=str(ce),
+                            hint=f"Login with a superuser and run: CREATE DATABASE {target_db}; then retry.",
+                        ) from ce
+                else:
+                    # Re-raise as a structured ConnectionError with context
+                    raise ConnectionError(
+                        "PostgreSQL connection failed",
+                        database=target_db,
+                        adapter="PGVector",
+                        host=host,
+                        port=port,
+                        user=user,
+                        original_error=msg,
+                    ) from e
         return self._conn
 
     @property
@@ -124,7 +196,8 @@ class PGVectorAdapter(VectorDBAdapter):
             **kwargs: Additional configuration options
         """
         self.store_text = store_text if store_text is not None else api_settings.VECTOR_STORE_TEXT
-        self.get_collection(collection_name, embedding_dimension, metric)
+        # Use get_or_create_collection to ensure table exists with proper schema
+        self.get_or_create_collection(collection_name, embedding_dimension, metric)
         self.logger.message(
             f"PGVector initialized: collection='{collection_name}', "
             f"dimension={embedding_dimension}, metric={metric}, store_text={self.store_text}"
@@ -164,6 +237,15 @@ class PGVectorAdapter(VectorDBAdapter):
 
         desired_int64 = (api_settings.PRIMARY_KEY_MODE or "uuid").lower() == "int64"
         pk_type = "BIGINT" if desired_int64 else "VARCHAR(255)"
+
+        # Ensure pgvector extension installed
+        try:
+            self.cursor.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            self.conn.commit()
+            self.logger.message("pgvector extension ensured (CREATE EXTENSION IF NOT EXISTS vector).")
+        except Exception:
+            self.conn.rollback()
+            raise
 
         create_table_sql = f"""
         CREATE TABLE {collection_name} (
@@ -253,6 +335,15 @@ class PGVectorAdapter(VectorDBAdapter):
                 )
                 self.cursor.execute(f"DROP TABLE IF EXISTS {collection_name}")
                 self.conn.commit()
+
+        # Ensure pgvector extension installed before creating table
+        try:
+            self.cursor.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            self.conn.commit()
+            self.logger.message("pgvector extension ensured (CREATE EXTENSION IF NOT EXISTS vector).")
+        except Exception:
+            self.conn.rollback()
+            raise
 
         create_table_sql = f"""
         CREATE TABLE IF NOT EXISTS {collection_name} (
@@ -352,9 +443,9 @@ class PGVectorAdapter(VectorDBAdapter):
             raise CollectionNotInitializedError("Collection is not initialized", operation="search", adapter="PGVector")
 
         # Construct SELECT query based on requested fields
-        select_fields = ["id"]
+        select_fields = ["id", "vector"]
         if vector is not None:
-            select_fields.append("vector <-> %s::vector AS score")
+            select_fields.append("vector <-> %s::vector AS distance")
         if fields is None or "text" in fields:
             select_fields.append("text")
         if fields is None or "metadata" in fields:
@@ -365,25 +456,49 @@ class PGVectorAdapter(VectorDBAdapter):
         params: List[Any] = []
         if vector is not None:
             params.append(vector)
-        if where:
-            conditions = []
-            for key, value in where.items():
-                conditions.append("metadata->>%s = %s")
-                params.extend([key, str(value)])
-            where_clause = " WHERE " + " AND ".join(conditions)
+
+        if where is not None:
+            # Compiler handles both Q objects and dicts
+            where_clause = " WHERE " + self.where_compiler.to_where(where)
 
         if limit is None:
             limit = api_settings.VECTOR_SEARCH_LIMIT
         params.extend([limit, offset])
-        order_clause = " ORDER BY score ASC" if vector is not None else ""
+        # Order by distance (lower distance = higher similarity); we map to score later
+        order_clause = " ORDER BY distance ASC" if vector is not None else ""
         sql = f"SELECT {', '.join(select_fields)} FROM {self.collection_name}{where_clause}{order_clause} LIMIT %s OFFSET %s"
-        self.cursor.execute(sql, tuple(params))
+        try:
+            self.cursor.execute(sql, tuple(params))
+        except Exception as exec_err:
+            # Ensure aborted transaction does not poison subsequent operations
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
+            raise exec_err
         results = self.cursor.fetchall()
 
         # Convert to VectorDocument instances
         vector_docs = []
         for r in results:
-            doc_dict = {"_id": r["id"], "metadata": r.get("metadata", {})}
+            metadata_block = r.get("metadata", {}) or {}
+            # Map distance to similarity score if present (assume cosine distance range [0,1])
+            if vector is not None and "distance" in r and isinstance(r["distance"], (int, float)):
+                dist = r["distance"]
+                score = 1.0 - dist if 0.0 <= dist <= 1.0 else float(dist)
+                if "score" not in metadata_block and isinstance(metadata_block, dict):
+                    metadata_block["score"] = score
+            raw_vec = r.get("vector")
+            vec: List[float] = []
+            if raw_vec is not None:
+                if isinstance(raw_vec, list):
+                    vec = raw_vec
+                elif hasattr(raw_vec, "tolist"):
+                    try:
+                        vec = list(raw_vec.tolist())
+                    except Exception:
+                        vec = []
+            doc_dict = {"_id": r["id"], "vector": vec, "metadata": metadata_block}
             if "text" in r:
                 doc_dict["text"] = r["text"]
             vector_docs.append(VectorDocument.from_kwargs(**doc_dict))
@@ -428,9 +543,26 @@ class PGVectorAdapter(VectorDBAdapter):
             if len(rows) > 1:
                 raise MultipleObjectsReturned(f"Multiple documents found with ID '{doc_id}'")
             result = rows[0]
+            raw_vec = result.get("vector")
+            parsed_vec: List[float] = []
+            if isinstance(raw_vec, list):
+                parsed_vec = raw_vec
+            elif isinstance(raw_vec, str):
+                # Parse pgvector textual representation: '[v1,v2,...]'
+                trimmed = raw_vec.strip().strip("[]")
+                if trimmed:
+                    try:
+                        parsed_vec = [float(x) for x in trimmed.split(",") if x.strip()]
+                    except Exception:
+                        parsed_vec = []
+            elif hasattr(raw_vec, "tolist"):
+                try:
+                    parsed_vec = list(raw_vec.tolist())
+                except Exception:
+                    parsed_vec = []
             doc_data = {
                 "_id": result["id"],
-                "vector": result["vector"],
+                "vector": parsed_vec,
                 "text": result["text"],
                 "metadata": result["metadata"] or {},
             }
@@ -548,10 +680,26 @@ class PGVectorAdapter(VectorDBAdapter):
             params.append(json.dumps(metadata))
 
         if not updates:
-            # No changes to make
+            # No changes to make; parse vector for consistency
+            raw_vec = existing.get("vector")
+            parsed_vec: List[float] = []
+            if isinstance(raw_vec, list):
+                parsed_vec = raw_vec
+            elif isinstance(raw_vec, str):
+                trimmed = raw_vec.strip().strip("[]")
+                if trimmed:
+                    try:
+                        parsed_vec = [float(x) for x in trimmed.split(",") if x.strip()]
+                    except Exception:
+                        parsed_vec = []
+            elif hasattr(raw_vec, "tolist"):
+                try:
+                    parsed_vec = list(raw_vec.tolist())
+                except Exception:
+                    parsed_vec = []
             doc_data = {
                 "_id": existing["id"],
-                "vector": existing["vector"],
+                "vector": parsed_vec,
                 "text": existing["text"],
                 "metadata": existing["metadata"] or {},
             }
@@ -578,10 +726,15 @@ class PGVectorAdapter(VectorDBAdapter):
         Raises:
             CollectionNotInitializedError: If collection is not initialized
         """
-        if not self.collection_name:
-            raise CollectionNotInitializedError("Collection is not initialized", operation="delete", adapter="PGVector")
+        if not self._conn:
+            raise CollectionNotInitializedError("Connection is not initialized", operation="delete", adapter="PgVector")
 
-        pks = normalize_pks(ids)
+        # Convert single ID to list
+        if isinstance(ids, (str, int)):
+            pks = [ids]
+        else:
+            pks = list(ids) if ids else []
+
         if not pks:
             return 0
 
@@ -729,7 +882,8 @@ class PGVectorAdapter(VectorDBAdapter):
         pks = list(doc_map.keys())
         placeholders = ",".join(["%s"] * len(pks))
         self.cursor.execute(f"SELECT id FROM {self.collection_name} WHERE id IN ({placeholders})", pks)
-        existing_pks = {row[0] for row in self.cursor.fetchall()}
+        # RealDictCursor returns dicts, not tuples
+        existing_pks = {row["id"] for row in self.cursor.fetchall()}
 
         # Check for missing documents
         missing = [pk for pk in pks if pk not in existing_pks]
@@ -742,17 +896,15 @@ class PGVectorAdapter(VectorDBAdapter):
 
         # Collect documents that exist for batch upsert
         dataset: List[VectorDocument] = []
-        updated_docs: List[VectorDocument] = []
 
         for pk, doc in doc_map.items():
             if pk in existing_pks:
                 dataset.append(doc)
-                updated_docs.append(doc)
 
-        # Batch upsert all collected documents
+        # Batch upsert all collected documents and return the upserted results
         if dataset:
-            self.upsert(dataset, batch_size=batch_size)
-        return updated_docs
+            return self.upsert(dataset, batch_size=batch_size)
+        return []
 
     def upsert(self, docs: List[VectorDocument], batch_size: int = None) -> List[VectorDocument]:
         """Insert or update multiple documents.

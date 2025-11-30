@@ -1,7 +1,7 @@
 """Pydantic schemas for vector store operations."""
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -39,9 +39,11 @@ class VectorDocument(BaseModel):
     def from_kwargs(cls, **kwargs: Any) -> "VectorDocument":
         pk = extract_pk(None, **kwargs)
         # Remove pk fields so they don't leak into metadata
-        for _k in ("_id", "id", "pk"):
-            kwargs.pop(_k, None)
-        vector = kwargs.pop("$vector", None) or kwargs.pop("vector", None)
+        for k in ("_id", "id", "pk"):
+            kwargs.pop(k, None)
+        vector = kwargs.pop("vector", None)
+        if "$vector" in kwargs and kwargs["$vector"] is not None:
+            vector = kwargs.pop("$vector")
         if vector is None:
             raise MissingFieldError("'vector' or '$vector' is required for document.from_kwargs", field="vector")
         text = kwargs.pop("text", None)
@@ -257,3 +259,102 @@ class VectorDocument(BaseModel):
             vector=new_vector or [],
             metadata=new_metadata,
         )
+
+    # ------------------------------------------------------------------
+    # New helper serialization methods
+    # ------------------------------------------------------------------
+    def to_vector(
+        self,
+        *,
+        require: bool = False,
+        output_format: Literal["dict", "json", "str", "list"] = "list",
+    ) -> Any:
+        """Return the underlying embedding vector.
+
+        Args:
+            require: If True, raise MissingFieldError when vector is empty.
+            output_format: Desired format of output.
+                - 'list' (default): Python list of floats
+                - 'dict': {'vector': [...]} wrapper
+                - 'json': JSON string
+                - 'str': String representation
+
+        Returns:
+            Vector in requested format.
+
+        Raises:
+            MissingFieldError: If require=True and vector is empty.
+        """
+        if require and not self.vector:
+            raise MissingFieldError("Vector is required", field="vector")
+        vec = list(self.vector)
+        if output_format == "list":
+            return vec
+        if output_format == "dict":
+            return {"vector": vec}
+        if output_format == "json":
+            import json
+
+            return json.dumps(vec, ensure_ascii=False)
+        if output_format == "str":
+            return str(vec)
+        return vec  # fallback
+
+    def to_metadata(
+        self,
+        *,
+        exclude: set[str] | None = None,
+        sanitize: bool = False,
+        max_str_len: int | None = None,
+        output_format: Literal["dict", "json", "str"] = "dict",
+    ) -> Any:
+        """Serialize metadata for adapter/storage use.
+
+        Produces a dict of metadata excluding reserved keys. Optionally sanitizes
+        complex values (list, dict, set, tuple, custom objects) into JSON strings.
+
+        Args:
+            exclude: Additional keys to exclude from output.
+            sanitize: If True, convert non-primitive values to JSON (fallback to str).
+            max_str_len: If provided, truncate very long JSON/string values to this length.
+            output_format: Output format selection.
+                - 'dict' (default): Python dict
+                - 'json': JSON string
+                - 'str': String representation (repr)
+
+        Returns:
+            Metadata in requested format.
+
+        Notes:
+            Reserved keys automatically excluded: id, _id, pk, vector, $vector, text,
+            created_timestamp, updated_timestamp.
+        """
+        reserved = {"id", "_id", "pk", "vector", "$vector", "text", "created_timestamp", "updated_timestamp"}
+        if exclude:
+            reserved |= set(exclude)
+        out: Dict[str, Any] = {}
+        for k, v in self.metadata.items():
+            if k in reserved:
+                continue
+            if not sanitize or isinstance(v, (str, int, float, bool)) or v is None:
+                out[k] = v
+                continue
+            # Sanitize complex types
+            try:
+                import json  # local import to avoid cost if unused
+
+                serialized = json.dumps(v, ensure_ascii=False)
+            except Exception:
+                serialized = str(v)
+            if max_str_len is not None and isinstance(serialized, str) and len(serialized) > max_str_len:
+                serialized = serialized[:max_str_len] + "…"
+            out[k] = serialized
+        if output_format == "dict":
+            return out
+        if output_format == "json":
+            import json
+
+            return json.dumps(out, ensure_ascii=False)
+        if output_format == "str":
+            return str(out)
+        return out

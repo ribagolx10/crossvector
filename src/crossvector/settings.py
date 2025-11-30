@@ -23,29 +23,29 @@ class CrossVectorSettings(BaseSettings):
     ASTRA_DB_COLLECTION_NAME: str = "vector_documents"
 
     # Milvus
-    MILVUS_API_ENDPOINT: Optional[str] = None
-    MILVUS_USER: Optional[str] = None
-    MILVUS_PASSWORD: Optional[str] = None
+    MILVUS_API_ENDPOINT: Optional[str] = "http://localhost:19530"
+    MILVUS_API_KEY: Optional[str] = None
 
     # PGVector
     PGVECTOR_HOST: str = "localhost"
     PGVECTOR_PORT: str = "5432"
-    PGVECTOR_DBNAME: str = "postgres"
+    PGVECTOR_DBNAME: str = "vector_db"
     PGVECTOR_USER: str = "postgres"
     PGVECTOR_PASSWORD: str = "postgres"
 
     # ChromaDB
     CHROMA_API_KEY: Optional[str] = None
-    CHROMA_CLOUD_TENANT: Optional[str] = None
-    CHROMA_CLOUD_DATABASE: Optional[str] = None
-    CHROMA_HTTP_HOST: Optional[str] = None
-    CHROMA_HTTP_PORT: Optional[str] = None
+    CHROMA_TENANT: Optional[str] = None
+    CHROMA_DATABASE: Optional[str] = None
+    CHROMA_HOST: Optional[str] = None
+    CHROMA_PORT: Optional[str] = None
     CHROMA_PERSIST_DIR: Optional[str] = None
 
     # Vector settings
     VECTOR_METRIC: str = "cosine"
     VECTOR_STORE_TEXT: bool = False
-    LOG_LEVEL: str = "DEBUG"
+    VECTOR_DIM: int = 1536
+    LOG_LEVEL: str = "INFO"
     VECTOR_SEARCH_LIMIT: int = 10
     PRIMARY_KEY_MODE: Literal["uuid", "hash_text", "hash_vector", "int64", "auto"] = (
         "uuid"  # choices: uuid, hash_text, hash_vector, int64, auto

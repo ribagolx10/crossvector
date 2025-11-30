@@ -1,12 +1,18 @@
 """Abstract Base Classes for the Vector Store components."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Set
+from typing import TYPE_CHECKING, Any, Dict, List, Set, Union
 
 from crossvector.logger import Logger
+from crossvector.querydsl.compilers.base import BaseWhere
 
 from .schema import VectorDocument
 from .types import DocIds
+
+if TYPE_CHECKING:
+    from crossvector.querydsl.q import Q
 
 
 class EmbeddingAdapter(ABC):
@@ -54,6 +60,8 @@ class VectorDBAdapter(ABC):
     """
 
     use_dollar_vector: bool = False
+    supports_metadata_only: bool = False
+    where_compiler: BaseWhere = None
 
     def __init__(self, logger: Logger = None, **kwargs: Any) -> None:
         # Base init primarily for standardized logging across adapters
@@ -179,7 +187,7 @@ class VectorDBAdapter(ABC):
         vector: List[float] | None = None,
         limit: int | None = None,
         offset: int = 0,
-        where: Dict[str, Any] | None = None,
+        where: Union[Dict[str, Any], "Q", None] = None,
         fields: Set[str] | None = None,
     ) -> List[VectorDocument]:
         """Perform vector similarity search to find nearest neighbors.
@@ -188,7 +196,11 @@ class VectorDBAdapter(ABC):
             vector: Query vector embedding to search for. If None, performs metadata-only query.
             limit: Maximum number of results to return. If None, uses VECTOR_SEARCH_LIMIT from settings.
             offset: Number of results to skip (for pagination). Default is 0.
-            where: Optional metadata filter conditions as key-value pairs.
+            where: Optional metadata filter conditions. Can be:
+                - Q object: QueryDSL object for complex filters (supports &, |, ~)
+                  Example: Q(age__gte=18) & Q(status="active")
+                - Dict: Universal dict format with operators
+                  Example: {"age": {"$gte": 18}, "status": {"$eq": "active"}}
                 Only documents matching all conditions will be returned.
             fields: Optional set of field names to include in results.
                 If None, returns all fields except vector by default.

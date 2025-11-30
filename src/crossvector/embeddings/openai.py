@@ -1,6 +1,6 @@
 """Concrete adapter for OpenAI embedding models."""
 
-from typing import List
+from typing import List, Optional
 
 from openai import OpenAI
 
@@ -21,13 +21,19 @@ class OpenAIEmbeddingAdapter(EmbeddingAdapter):
         "text-embedding-ada-002": 1536,
     }
 
-    def __init__(self, model_name: str = settings.OPENAI_EMBEDDING_MODEL):
+    def __init__(
+        self,
+        model_name: str = settings.OPENAI_EMBEDDING_MODEL,
+        dim: Optional[int] = None,
+    ):
         super().__init__(model_name)
         self._client: OpenAI | None = None
-        self._embedding_dimension = self._DIMENSIONS.get(model_name)
-        if not self._embedding_dimension:
+        # Only accept known OpenAI models; unknown should raise
+        if model_name in self._DIMENSIONS:
+            self._embedding_dimension = self._DIMENSIONS[model_name]
+        else:
             raise InvalidFieldError(
-                "Unknown embedding dimension for model",
+                "Unknown embedding dimension",
                 field="model_name",
                 value=model_name,
                 expected=list(self._DIMENSIONS.keys()),

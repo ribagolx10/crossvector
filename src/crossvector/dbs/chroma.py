@@ -32,18 +32,20 @@ from crossvector.exceptions import (
     MultipleObjectsReturned,
     SearchError,
 )
+from crossvector.querydsl.compilers.chroma import ChromaWhereCompiler, chroma_where
 from crossvector.schema import VectorDocument
 from crossvector.settings import settings as api_settings
 from crossvector.types import DocIds
 from crossvector.utils import (
     apply_update_fields,
     extract_pk,
-    normalize_pks,
+    flatten_metadata,
     prepare_item_for_storage,
+    unflatten_metadata,
 )
 
 
-class ChromaDBAdapter(VectorDBAdapter):
+class ChromaAdapter(VectorDBAdapter):
     """Vector database adapter for ChromaDB.
 
     Provides a high-level interface for vector operations using ChromaDB's
@@ -58,6 +60,9 @@ class ChromaDBAdapter(VectorDBAdapter):
     """
 
     use_dollar_vector: bool = False
+    where_compiler: ChromaWhereCompiler = chroma_where
+    # Capability flags
+    supports_metadata_only: bool = True  # Chroma supports metadata-only filtering without vector
 
     def __init__(self, **kwargs: Any):
         """Initialize the ChromaDB adapter with lazy client setup.
@@ -65,7 +70,7 @@ class ChromaDBAdapter(VectorDBAdapter):
         Args:
             **kwargs: Additional configuration options (currently unused)
         """
-        super(ChromaDBAdapter, self).__init__(**kwargs)
+        super(ChromaAdapter, self).__init__(**kwargs)
         self._client: chromadb.Client | None = None
         self._collection: chromadb.Collection | None = None
         self.collection_name: str | None = None
@@ -77,7 +82,7 @@ class ChromaDBAdapter(VectorDBAdapter):
 
         Attempts initialization in order:
         1. CloudClient (if CHROMA_CLOUD_API_KEY present)
-        2. HttpClient (if CHROMA_HTTP_HOST present)
+        2. HttpClient (if CHROMA_HOST present)
         3. Local persistence client (fallback)
 
         Returns:
@@ -92,8 +97,8 @@ class ChromaDBAdapter(VectorDBAdapter):
             if api_settings.CHROMA_API_KEY:
                 try:
                     self._client = chromadb.CloudClient(
-                        tenant=api_settings.CHROMA_CLOUD_TENANT,
-                        database=api_settings.CHROMA_CLOUD_DATABASE,
+                        tenant=api_settings.CHROMA_TENANT,
+                        database=api_settings.CHROMA_DATABASE,
                         api_key=api_settings.CHROMA_API_KEY,
                     )
                     self.logger.message("ChromaDB CloudClient initialized.")
@@ -104,8 +109,8 @@ class ChromaDBAdapter(VectorDBAdapter):
                         CloudClient = getattr(chromadb, "CloudClient", None)
                         if CloudClient:
                             self._client = CloudClient(
-                                tenant=api_settings.CHROMA_CLOUD_TENANT,
-                                database=api_settings.CHROMA_CLOUD_DATABASE,
+                                tenant=api_settings.CHROMA_TENANT,
+                                database=api_settings.CHROMA_DATABASE,
                                 api_key=api_settings.CHROMA_API_KEY,
                             )
                             self.logger.message("ChromaDB CloudClient (top-level) initialized.")
@@ -117,19 +122,17 @@ class ChromaDBAdapter(VectorDBAdapter):
                         raise ConnectionError("Failed to initialize cloud ChromaDB client", adapter="ChromaDB")
 
             # 2) Try HttpClient (self-hosted server) if host/port provided
-            if api_settings.CHROMA_HTTP_HOST:
+            if api_settings.CHROMA_HOST:
                 try:
                     HttpClient = getattr(chromadb, "HttpClient", None)
                     if HttpClient:
-                        if api_settings.CHROMA_HTTP_PORT:
-                            self._client = HttpClient(
-                                host=api_settings.CHROMA_HTTP_HOST, port=int(api_settings.CHROMA_HTTP_PORT)
-                            )
+                        if api_settings.CHROMA_PORT:
+                            self._client = HttpClient(host=api_settings.CHROMA_HOST, port=int(api_settings.CHROMA_PORT))
                         else:
-                            self._client = HttpClient(host=api_settings.CHROMA_HTTP_HOST)
+                            self._client = HttpClient(host=api_settings.CHROMA_HOST)
 
                         self.logger.message(
-                            f"ChromaDB HttpClient initialized (host={api_settings.CHROMA_HTTP_HOST}, port={api_settings.CHROMA_HTTP_PORT})."
+                            f"ChromaDB HttpClient initialized (host={api_settings.CHROMA_HOST}, port={api_settings.CHROMA_PORT})."
                         )
                         return self._client
                 except Exception as e:
@@ -161,7 +164,7 @@ class ChromaDBAdapter(VectorDBAdapter):
             raise CollectionNotInitializedError(
                 "Collection is not initialized", operation="property_access", adapter="ChromaDB"
             )
-        return self.get_collection(self.collection_name, self.embedding_dimension)
+        return self.get_collection(self.collection_name)
 
     # ------------------------------------------------------------------
     # Collection Management
@@ -382,6 +385,10 @@ class ChromaDBAdapter(VectorDBAdapter):
         if limit is None:
             limit = api_settings.VECTOR_SEARCH_LIMIT
 
+        # Always compile where via where_compiler; avoid method-specific tweaks
+        if where is not None:
+            where = self.where_compiler.to_where(where)
+
         # Metadata-only search not directly supported by ChromaDB
         # Use get with where filter if no vector provided
         if vector is None:
@@ -393,17 +400,32 @@ class ChromaDBAdapter(VectorDBAdapter):
             include = ["metadatas"]
             if self.store_text and (fields is None or "text" in fields):
                 include.append("documents")
-            results = self.collection.get(where=where, limit=limit + offset, include=include)
-            # Apply offset
-            ids = results["ids"][offset:] if results.get("ids") else []
-            metadatas = results["metadatas"][offset:] if results.get("metadatas") else []
-            documents = results["documents"][offset:] if results.get("documents") else [None] * len(ids)
+
+            fetch_limit = limit + offset
+            results = self.collection.get(where=where, limit=fetch_limit, include=include)
+
+            # Build initial document list
+            ids = results["ids"] if results.get("ids") else []
+            metadatas = results["metadatas"] if results.get("metadatas") else []
+            documents = results["documents"] if results.get("documents") else [None] * len(ids)
+
             vector_docs = []
             for id_, meta, doc in zip(ids, metadatas, documents):
-                doc_dict = {"_id": id_, "metadata": meta or {}}
-                if doc is not None:
-                    doc_dict["text"] = doc
-                vector_docs.append(VectorDocument.from_kwargs(**doc_dict))
+                # Unflatten metadata before returning
+                metadata_val = unflatten_metadata(meta or {})
+
+                # Build document without requiring vector (metadata-only fetch)
+                vector_docs.append(
+                    VectorDocument(
+                        id=id_,
+                        vector=[],  # unknown/omitted
+                        text=doc if doc is not None else None,
+                        metadata=metadata_val,
+                    )
+                )
+
+            # Apply offset and limit after client filtering
+            vector_docs = vector_docs[offset : offset + limit]
             self.logger.message(f"Search returned {len(vector_docs)} results.")
             return vector_docs
 
@@ -437,10 +459,19 @@ class ChromaDBAdapter(VectorDBAdapter):
         # Convert to VectorDocument instances
         vector_docs = []
         for id_, dist, meta, doc in zip(ids, distances, metadatas, documents):
-            doc_dict = {"_id": id_, "metadata": meta or {}}
-            if doc is not None:
-                doc_dict["text"] = doc
-            vector_docs.append(VectorDocument.from_kwargs(**doc_dict))
+            # Unflatten metadata before returning
+            metadata_val = unflatten_metadata(meta or {})
+            if isinstance(dist, (int, float)):
+                metadata_val["score"] = 1 - dist
+
+            vector_docs.append(
+                VectorDocument(
+                    id=id_,
+                    vector=[],  # similarity search result can omit vector unless included explicitly
+                    text=doc if doc is not None else None,
+                    metadata=metadata_val,
+                )
+            )
 
         self.logger.message(f"Vector search returned {len(vector_docs)} results.")
         return vector_docs
@@ -479,14 +510,30 @@ class ChromaDBAdapter(VectorDBAdapter):
                 raise DoesNotExist(f"Document with ID '{doc_id}' not found")
             if len(results["ids"]) > 1:
                 raise MultipleObjectsReturned(f"Multiple documents found with ID '{doc_id}'")
-            doc_data = {
-                "_id": results["ids"][0],
-                "vector": results["embeddings"][0] if results.get("embeddings") else None,
-                "metadata": results["metadatas"][0] if results["metadatas"] else {},
-            }
-            if results.get("documents"):
-                doc_data["text"] = results["documents"][0]
-            return VectorDocument.from_kwargs(**doc_data)
+            embeddings = results.get("embeddings")
+            if embeddings is None:
+                embeddings = []
+            metadatas = results.get("metadatas")
+            if metadatas is None:
+                metadatas = []
+            documents = results.get("documents")
+            if documents is None:
+                documents = []
+            vector_val = embeddings[0] if len(embeddings) > 0 else []
+            metadata_val = metadatas[0] if len(metadatas) > 0 else {}
+            text_val = documents[0] if len(documents) > 0 else None
+            # Unflatten metadata to restore nested structure
+            metadata_val = unflatten_metadata(metadata_val) if metadata_val else {}
+            return VectorDocument(
+                id=results["ids"][0],
+                vector=vector_val
+                if isinstance(vector_val, list)
+                else list(vector_val)
+                if vector_val is not None
+                else [],
+                text=text_val,
+                metadata=metadata_val,
+            )
 
         # Priority 2: Search by metadata kwargs using search method
         metadata_kwargs = {k: v for k, v in kwargs.items() if k not in ("pk", "id", "_id")}
@@ -519,11 +566,10 @@ class ChromaDBAdapter(VectorDBAdapter):
         if not self.collection:
             raise CollectionNotInitializedError("Collection is not initialized", operation="create", adapter="ChromaDB")
 
-        stored = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
-
         pk = doc.pk
-        vector = stored.get("$vector") or stored.get("vector")
-        if vector is None:
+        try:
+            vector = doc.to_vector(require=True, output_format="list")
+        except MissingFieldError:
             raise InvalidFieldError("Vector is required", field="vector", operation="create")
 
         # Conflict check
@@ -531,8 +577,11 @@ class ChromaDBAdapter(VectorDBAdapter):
         if existing.get("ids"):
             raise DocumentExistsError("Document already exists", document_id=pk)
 
-        text = stored.get("text") if self.store_text else None
-        metadata = {k: v for k, v in stored.items() if k not in ("_id", "$vector", "text")}
+        text = doc.text if (self.store_text and doc.text is not None) else None
+        metadata = doc.to_metadata(sanitize=True, output_format="dict")
+
+        # Flatten nested metadata for Chroma
+        metadata = flatten_metadata(metadata)
 
         self.collection.add(ids=[pk], embeddings=[vector], metadatas=[metadata], documents=[text] if text else None)
         self.logger.message(f"Created document with id '{pk}'.")
@@ -574,10 +623,16 @@ class ChromaDBAdapter(VectorDBAdapter):
         text = prepared.get("text") if self.store_text else (existing.get("documents", [None])[0])
 
         # Start from existing metadata, overlay new fields
-        metadata = existing["metadatas"][0] if existing["metadatas"] else {}
+        existing_meta = existing["metadatas"][0] if existing["metadatas"] else {}
+        # Unflatten existing to allow nested updates
+        metadata = unflatten_metadata(existing_meta)
+
         for k, v in prepared.items():
             if k not in ("_id", "$vector", "text"):
                 metadata[k] = v
+
+        # Flatten back for Chroma
+        metadata = flatten_metadata(metadata)
 
         self.collection.update(ids=[pk], embeddings=[vector], metadatas=[metadata], documents=[text] if text else None)
         self.logger.message(f"Updated document with id '{pk}'.")
@@ -609,7 +664,12 @@ class ChromaDBAdapter(VectorDBAdapter):
         if not self.collection:
             raise CollectionNotInitializedError("Collection is not initialized", operation="delete", adapter="ChromaDB")
 
-        pks = normalize_pks(ids)
+        # Convert single ID to list
+        if isinstance(ids, (str, int)):
+            pks = [ids]
+        else:
+            pks = list(ids) if ids else []
+
         if not pks:
             return 0
 
@@ -660,22 +720,31 @@ class ChromaDBAdapter(VectorDBAdapter):
         created_docs: List[VectorDocument] = []
 
         for doc in docs:
-            item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
             pk = doc.pk
-            vector = item.get("$vector") or item.get("vector")
-            if vector is None:
+            try:
+                vector = doc.to_vector(require=True, output_format="list")
+            except MissingFieldError:
                 raise InvalidFieldError("Vector is required", field="vector", operation="bulk_create")
 
-            # Conflict detection (id only)
             existing = self.collection.get(ids=[pk])
             if existing.get("ids"):
                 if ignore_conflicts:
                     continue
                 if update_conflicts:
-                    # Perform update instead
-                    update_doc = apply_update_fields(item, update_fields)
-                    meta_update = {k: v for k, v in update_doc.items() if k not in ("_id", "$vector", "text")}
+                    # Build update payload using helpers
+                    base_dict = doc.to_storage_dict(
+                        store_text=self.store_text, use_dollar_vector=self.use_dollar_vector
+                    )
+                    update_doc = apply_update_fields(base_dict, update_fields)
+                    if not update_doc:
+                        continue
                     vector_update = update_doc.get("$vector") or update_doc.get("vector") or vector
+                    tmp_meta_doc = VectorDocument(
+                        id=pk,
+                        vector=[],
+                        metadata={k: v for k, v in update_doc.items() if k not in {"_id", "$vector", "vector", "text"}},
+                    )
+                    meta_update = tmp_meta_doc.to_metadata(sanitize=True, output_format="dict")
                     text_update = update_doc.get("text") if self.store_text else None
                     self.collection.update(
                         ids=[pk],
@@ -686,8 +755,13 @@ class ChromaDBAdapter(VectorDBAdapter):
                     continue
                 raise DocumentExistsError("Document already exists", document_id=pk, operation="bulk_create")
 
-            metadata = {k: v for k, v in item.items() if k not in ("_id", "$vector", "text")}
-            text_val = item.get("text") if self.store_text else None
+            metadata = doc.to_metadata(
+                exclude={"created_timestamp", "updated_timestamp"}, sanitize=True, output_format="dict"
+            )
+            # Flatten nested metadata for Chroma
+            metadata = flatten_metadata(metadata)
+
+            text_val = doc.text if (self.store_text and doc.text is not None) else None
 
             to_add_ids.append(pk)
             to_add_vectors.append(vector)
@@ -789,31 +863,52 @@ class ChromaDBAdapter(VectorDBAdapter):
         update_texts: List[str | None] = []
         updated_docs: List[VectorDocument] = []
 
-        embeddings_list = existing_batch.get("embeddings", []) or []
-        metadatas_list = existing_batch.get("metadatas", []) or []
-        documents_list = existing_batch.get("documents", []) or []
+        # Get embeddings list without truthiness check to avoid array comparison issues
+        embeddings_list = existing_batch.get("embeddings", [])
+        if embeddings_list is None:
+            embeddings_list = []
+        metadatas_list = existing_batch.get("metadatas", [])
+        if metadatas_list is None:
+            metadatas_list = []
+        documents_list = existing_batch.get("documents", [])
+        if documents_list is None:
+            documents_list = []
 
         for pk, doc in pk_doc_map.items():
             if pk not in id_index:
-                # skipped due to ignore_conflicts
                 continue
             idx = id_index[pk]
             existing_embedding = embeddings_list[idx] if idx < len(embeddings_list) else None
             existing_metadata = metadatas_list[idx] if idx < len(metadatas_list) else {}
             existing_text = documents_list[idx] if idx < len(documents_list) else None
 
-            item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
-            update_doc = apply_update_fields(item, update_fields)
+            base_dict = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
+            update_doc = apply_update_fields(base_dict, update_fields)
             if not update_doc:
                 continue
 
-            vector_update = update_doc.get("$vector") or update_doc.get("vector") or existing_embedding
-            # Merge metadata: preserve existing then overlay update fields (excluding reserved keys)
-            metadata_merge = dict(existing_metadata)
+            # Use explicit None checks to avoid array truthiness issues
+            vector_update = update_doc.get("$vector")
+            if vector_update is None:
+                vector_update = update_doc.get("vector")
+            if vector_update is None:
+                vector_update = existing_embedding
+            # Unflatten existing metadata first
+            metadata_merge = unflatten_metadata(dict(existing_metadata))
             for k, v in update_doc.items():
-                if k not in ("_id", "$vector", "text", "vector"):
+                if k not in {"_id", "$vector", "text", "vector"}:
                     metadata_merge[k] = v
-            meta_update = metadata_merge if metadata_merge else None
+            # Sanitize merged metadata via helper
+            tmp_meta_doc = VectorDocument(id=pk, vector=[], metadata=metadata_merge)
+            meta_result = tmp_meta_doc.to_metadata(sanitize=True, output_format="dict")
+            # Flatten metadata for Chroma
+            meta_result = flatten_metadata(meta_result) if meta_result else {}
+            # Keep metadata if it exists and is a non-empty dict
+            meta_update = (
+                meta_result
+                if (meta_result is not None and isinstance(meta_result, dict) and len(meta_result) > 0)
+                else None
+            )
             text_update = update_doc.get("text") if self.store_text else None
             if text_update is None and self.store_text:
                 text_update = existing_text
@@ -876,12 +971,18 @@ class ChromaDBAdapter(VectorDBAdapter):
         texts = []
 
         for doc in docs:
-            item = doc.to_storage_dict(store_text=self.store_text, use_dollar_vector=self.use_dollar_vector)
             ids.append(doc.pk)
-            vectors.append(item.get("$vector") or item.get("vector"))
-            metadata = {k: v for k, v in item.items() if k not in ("_id", "$vector", "text")}
+            try:
+                vectors.append(doc.to_vector(require=True, output_format="list"))
+            except MissingFieldError:
+                vectors.append([])  # keep alignment; Chroma may reject empty but let upstream handle
+            metadata = doc.to_metadata(
+                exclude={"created_timestamp", "updated_timestamp"}, sanitize=True, output_format="dict"
+            )
+            # Flatten metadata for Chroma
+            metadata = flatten_metadata(metadata)
             metadatas.append(metadata)
-            texts.append(item.get("text") if self.store_text else None)
+            texts.append(doc.text if (self.store_text and doc.text is not None) else None)
 
         # Use Chroma's native upsert API to insert or update
         if batch_size and batch_size > 0:

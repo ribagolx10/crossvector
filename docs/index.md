@@ -1,36 +1,105 @@
-# CrossVector
+# CrossVector Documentation
 
-## Cross-platform Vector Database Engine
+Welcome to CrossVector - a unified Python library for vector database operations with pluggable backends and embedding providers.
 
-A flexible, production-ready vector database engine with pluggable adapters for multiple vector databases,
-(AstraDB, ChromaDB, Milvus, PGVector) and embedding providers (OpenAI, Gemini, and more).
+## What is CrossVector?
 
-Simplify your vector search infrastructure with a single, unified API across all major vector databases.
+CrossVector provides a consistent, high-level API across multiple vector databases (AstraDB, ChromaDB, Milvus, PgVector) and embedding providers (OpenAI, Gemini). Write your code once, switch backends without rewriting your application.
 
-## Features
+## Key Features
 
-- 🔌 **Pluggable Architecture**: Easy adapter pattern for both databases and embeddings
-- 🗄️ **Multiple Vector Databases**: AstraDB, ChromaDB, Milvus, PGVector
-- 🤖 **Multiple Embedding Providers**: OpenAI, Gemini
-- 🎯 **Smart Document Handling**: Auto-generated IDs (UUID/hash/int64/custom), optional text storage
-- 📦 **Install Only What You Need**: Optional dependencies per adapter
-- 🔒 **Type-Safe**: Full Pydantic validation
-- 🔄 **Consistent API**: Same interface across all adapters
-- 🧭 **Centralized Logging**: Unified `Logger` with configurable `LOG_LEVEL`
-- ❗ **Specific Exceptions**: Clear errors like `MissingFieldError`, `InvalidFieldError`, `MissingConfigError`
+- **🔌 Pluggable Architecture**: 4 vector databases, 2 embedding providers
+- **🎯 Unified API**: Consistent interface across all adapters
+- **🔍 Advanced Querying**: Type-safe Query DSL with Q objects
+- **🚀 Performance**: Automatic batch embedding, bulk operations
+- **🛡️ Type-Safe**: Full Pydantic validation and structured exceptions
+- **⚙️ Flexible Configuration**: Environment variables, multiple PK strategies
 
-## Supported Vector Databases
+## Quick Navigation
 
-| Database | Status | Features |
-| ---------- | -------- | ---------- |
-| **AstraDB** | ✅ Production | Cloud-native Cassandra, lazy initialization |
-| **ChromaDB** | ✅ Production | Cloud/HTTP/Local modes, auto-fallback |
-| **Milvus** | ✅ Production | Auto-indexing, schema validation |
-| **PGVector** | ✅ Production | PostgreSQL extension, JSONB metadata |
+### Getting Started
 
-## Supported Embedding Providers
+- [Installation](installation.md) - Install CrossVector and dependencies
+- [Quick Start](quickstart.md) - Your first CrossVector program
+- [Configuration](configuration.md) - Environment variables and settings
 
-| Provider | Status | Models |
-| ---------- | -------- | -------- |
-| **OpenAI** | ✅ Production | text-embedding-3-small, 3-large, ada-002 |
-| **Gemini** | ✅ Production | text-embedding-004, gemini-embedding-001 |
+### Core Concepts
+
+- [API Reference](api.md) - Complete VectorEngine API
+- [Schema](schema.md) - VectorDocument and data models
+- [Query DSL](querydsl.md) - Advanced filtering with Q objects
+
+### Adapters
+
+- [Database Adapters](adapters/databases.md) - AstraDB, ChromaDB, Milvus, PgVector
+- [Embedding Adapters](adapters/embeddings.md) - OpenAI, Gemini
+
+### Development
+
+- [Contributing](contributing.md) - How to contribute to CrossVector
+- [Architecture](architecture.md) - System design and components
+
+## Simple Example
+
+```python
+from crossvector import VectorEngine
+from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
+from crossvector.dbs.pgvector import PgVectorAdapter
+
+# Initialize
+engine = VectorEngine(
+    embedding=OpenAIEmbeddingAdapter(),
+    db=PgVectorAdapter(),
+    collection_name="documents"
+)
+
+# Create
+doc = engine.create(text="Python programming guide")
+
+# Search
+results = engine.search("python tutorials", limit=5)
+
+# Query with filters
+from crossvector.querydsl.q import Q
+results = engine.search(
+    "machine learning",
+    where=Q(category="tech") & Q(level="beginner")
+)
+```
+
+## Backend Support Matrix
+
+| Feature | AstraDB | ChromaDB | Milvus | PgVector |
+|---------|---------|----------|--------|----------|
+| Vector Search | ✅ | ✅ | ✅ | ✅ |
+| Metadata-Only Search | ✅ | ✅ | ❌ | ✅ |
+| Nested Metadata | ✅ | ✅* | ❌ | ✅ |
+| Numeric Comparisons | ✅ | ✅ | ✅ | ✅ |
+
+*ChromaDB supports nested metadata via dot-notation when flattened.
+
+## Status
+
+**Current Version**: 0.1.0 (Beta)
+
+⚠️ **Beta Status**: CrossVector is currently in beta. Do not use in production until version 1.0.
+
+- API may change without notice
+- Database schemas may evolve
+- Features are still being tested
+
+**Recommended for:**
+
+- ✅ Prototyping and development
+- ✅ Learning vector databases
+- ❌ Production applications
+
+## Support
+
+- **GitHub**: [thewebscraping/crossvector](https://github.com/thewebscraping/crossvector)
+- **Issues**: [Report bugs](https://github.com/thewebscraping/crossvector/issues)
+- **Discussions**: [Ask questions](https://github.com/thewebscraping/crossvector/discussions)
+
+## License
+
+CrossVector is released under the MIT License. See [LICENSE](../LICENSE) for details.
