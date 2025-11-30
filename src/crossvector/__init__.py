@@ -5,16 +5,17 @@ and exposes the main `VectorEngine` and schema classes for easy access.
 
 from .abc import EmbeddingAdapter, VectorDBAdapter
 from .engine import VectorEngine
-from .schema import Document, SearchRequest, UpsertRequest, VectorRequest
+from .schema import VectorDocument
+from .types import Doc, DocId, DocIds
 
-__version__ = "0.1.1"
+__version__ = "0.1.3"
 
 __all__ = [
     "VectorEngine",
     "EmbeddingAdapter",
     "VectorDBAdapter",
-    "Document",
-    "SearchRequest",
-    "UpsertRequest",
-    "VectorRequest",
+    "VectorDocument",
+    "Doc",
+    "DocId",
+    "DocIds",
 ]

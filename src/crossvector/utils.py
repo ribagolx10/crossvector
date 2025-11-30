@@ -1,0 +1,289 @@
+"""Utility functions for crossvector.
+
+Shared helpers extracted from adapters to reduce duplication.
+"""
+
+import hashlib
+import importlib
+import uuid
+from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Sequence, Union
+
+from .settings import settings
+
+# ===========================================================================
+# Core utilities
+# ===========================================================================
+
+
+def chunk_iter(seq: Sequence[Any], size: int) -> Iterator[Sequence[Any]]:
+    """Yield successive chunks from a sequence."""
+    if size <= 0:
+        yield seq
+        return
+    for i in range(0, len(seq), size):
+        yield seq[i : i + size]
+
+
+def extract_pk(doc: Any = None, **kwargs: Any) -> str | None:
+    """Extract primary key from doc object or kwargs/dict.
+
+    Supports _id, id, or pk fields from:
+    1. doc object attributes (if doc has 'id' attribute)
+    2. kwargs dict keys
+
+    Args:
+        doc: Optional object with id/pk attribute (e.g., VectorDocument)
+        **kwargs: Dictionary with _id/id/pk keys
+
+    Returns:
+        Extracted ID or None
+
+    Examples:
+        extract_pk(doc)  # from VectorDocument.id
+        extract_pk(id="123")  # from kwargs
+        extract_pk(doc, id="override")  # kwargs takes precedence
+    """
+    # Check kwargs first (allows override)
+    from_kwargs = kwargs.get("_id") or kwargs.get("id") or kwargs.get("pk")
+    if from_kwargs:
+        return from_kwargs
+    # Fallback to doc object attribute
+    if doc is not None and hasattr(doc, "id"):
+        return getattr(doc, "id", None)
+    return None
+
+
+# ===========================================================================
+# Primary key generation
+# ===========================================================================
+
+
+def load_custom_pk_factory(path: Optional[str]) -> Optional[Callable]:
+    """Load a custom primary key factory function from module path."""
+    if not path:
+        return None
+    try:
+        module_path, attr = path.rsplit(".", 1)
+        module = importlib.import_module(module_path)
+        fn = getattr(module, attr)
+        if callable(fn):
+            return fn
+    except Exception:
+        return None
+    return None
+
+
+_int64_pk_counter = 0
+_custom_pk_factory = load_custom_pk_factory(getattr(settings, "PRIMARY_KEY_FACTORY", None))
+
+
+def generate_pk(text: str | None, vector: List[float] | None, metadata: Dict[str, Any] | None = None) -> str:
+    """Generate a primary key based on PRIMARY_KEY_MODE setting.
+
+    Modes:
+        - uuid: Random UUID (default)
+        - hash_text: SHA256 hash of text
+        - hash_vector: SHA256 hash of vector
+        - int64: Sequential integer
+        - auto: Hash text if available, else hash vector, else UUID
+    """
+    global _int64_pk_counter
+    mode = (getattr(settings, "PRIMARY_KEY_MODE", "uuid") or "uuid").lower()
+    if _custom_pk_factory:
+        try:
+            return str(_custom_pk_factory(text, vector, metadata or {}))
+        except Exception:
+            pass
+    if mode == "uuid":
+        return uuid.uuid4().hex
+    if mode == "hash_text" and text:
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    if mode == "hash_vector" and vector:
+        vec_bytes = ("|".join(f"{x:.8f}" for x in vector)).encode("utf-8")
+        return hashlib.sha256(vec_bytes).hexdigest()
+    if mode == "int64":
+        _int64_pk_counter += 1
+        return str(_int64_pk_counter)
+    if mode == "auto":
+        if text:
+            return hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if vector:
+            vec_bytes = ("|".join(f"{x:.8f}" for x in vector)).encode("utf-8")
+            return hashlib.sha256(vec_bytes).hexdigest()
+        return uuid.uuid4().hex
+    return uuid.uuid4().hex
+
+
+def validate_primary_key_mode(
+    mode: str,
+) -> Literal["uuid", "hash_text", "hash_vector", "int64", "auto"]:
+    """Validate PRIMARY_KEY_MODE setting value.
+
+    Args:
+        mode: The primary key mode to validate
+
+    Returns:
+        The validated mode
+
+    Raises:
+        ValueError: If mode is not a valid option
+    """
+    valid_modes = {"uuid", "hash_text", "hash_vector", "int64", "auto"}
+    if mode not in valid_modes:
+        raise ValueError(f"Invalid PRIMARY_KEY_MODE: '{mode}'. Must be one of: {', '.join(sorted(valid_modes))}")
+    return mode  # type: ignore
+
+
+# ===========================================================================
+# Input normalization helpers for VectorEngine
+# ===========================================================================
+
+
+def normalize_texts(texts: Union[str, List[str]]) -> List[str]:
+    """Normalize text input to list of strings."""
+    return [texts] if isinstance(texts, str) else texts
+
+
+def normalize_metadatas(
+    metadatas: Union[Dict[str, Any], List[Dict[str, Any]], None],
+    count: int,
+) -> List[Dict[str, Any]]:
+    """Normalize metadata input to list of dicts matching text count."""
+    if metadatas is None:
+        return [{}] * count
+    elif isinstance(metadatas, dict):
+        return [metadatas] * count
+    else:
+        return metadatas
+
+
+def normalize_pks(
+    pks: Union[str, int, List[str], List[int], None],
+    count: int,
+) -> List[str | int | None]:
+    """Normalize primary key input to list matching text count."""
+    if pks is None:
+        return [None] * count
+    elif isinstance(pks, (str, int)):
+        if count == 1:
+            return [pks]
+        else:
+            raise ValueError(f"Single pk provided but count is {count}")
+    else:
+        pk_list = list(pks)
+        # Pad with None if necessary
+        if len(pk_list) < count:
+            pk_list.extend([None] * (count - len(pk_list)))
+        return pk_list[:count]  # Truncate if too long
+
+
+# ===========================================================================
+# Adapter shared helpers
+# ===========================================================================
+
+
+def prepare_item_for_storage(doc: Dict[str, Any] | Any, *, store_text: bool = True) -> Dict[str, Any]:
+    """Normalize a raw Document dict into a unified storage format.
+
+    Maps id/_id, vector/$vector, optionally text, and keeps remaining fields flat.
+    This assumes upstream caller will adapt to backend field naming if needed.
+    """
+    # Handle objects that implement 'dump' (e.g., Document)
+    if hasattr(doc, "dump") and callable(getattr(doc, "dump")):
+        item = doc.dump(store_text=store_text, use_dollar_vector=True)
+        # Ensure updated_timestamp is set for update operations
+        try:
+            from datetime import datetime, timezone
+
+            item.setdefault("updated_timestamp", datetime.now(timezone.utc).timestamp())
+        except Exception:
+            pass
+        return item
+    # Dict-like path
+    item: Dict[str, Any] = {}
+    _id = doc.get("_id") or doc.get("id")  # type: ignore[attr-defined]
+    if _id:
+        item["_id"] = _id
+    vector = doc.get("$vector") or doc.get("vector")  # type: ignore[attr-defined]
+    if vector is not None:
+        item["$vector"] = vector
+    if store_text and "text" in doc:  # type: ignore
+        item["text"] = doc["text"]  # type: ignore
+    for k, v in doc.items():  # type: ignore
+        if k not in ("_id", "id", "$vector", "vector", "text"):
+            item[k] = v
+    # Ensure updated_timestamp is set for update operations
+    try:
+        from datetime import datetime, timezone
+
+        item.setdefault("updated_timestamp", datetime.now(timezone.utc).timestamp())
+    except Exception:
+        pass
+    return item
+
+
+def apply_update_fields(item: Dict[str, Any], update_fields: Sequence[str] | None) -> Dict[str, Any]:
+    """Filter item to only the update fields provided (excluding _id)."""
+    fields = update_fields or [k for k in item.keys() if k != "_id"]
+    return {k: item[k] for k in fields if k in item and k != "_id"}
+
+
+def flatten_metadata(metadata: Dict[str, Any], parent_key: str = "", sep: str = ".") -> Dict[str, Any]:
+    """Flatten nested metadata dictionary into dot-notation keys.
+
+    Chroma and some other vector DBs require flat metadata with primitive values.
+    This converts nested dicts like {"info": {"lang": "en"}} to {"info.lang": "en"}.
+
+    Args:
+        metadata: Nested metadata dictionary
+        parent_key: Parent key prefix (used in recursion)
+        sep: Separator for nested keys (default ".")
+
+    Returns:
+        Flattened metadata dictionary with dot-notation keys
+
+    Examples:
+        >>> flatten_metadata({"info": {"lang": "en", "tier": "gold"}})
+        {"info.lang": "en", "info.tier": "gold"}
+        >>> flatten_metadata({"tags": ["ml", "ai"], "score": 0.9})
+        {"tags": ["ml", "ai"], "score": 0.9}
+    """
+    items: List[tuple[str, Any]] = []
+    for k, v in metadata.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            # Recursively flatten nested dicts
+            items.extend(flatten_metadata(v, new_key, sep=sep).items())
+        else:
+            # Keep primitive values and lists as-is
+            items.append((new_key, v))
+    return dict(items)
+
+
+def unflatten_metadata(flat_metadata: Dict[str, Any], sep: str = ".") -> Dict[str, Any]:
+    """Unflatten dot-notation metadata back to nested structure.
+
+    Reverse operation of flatten_metadata. Converts {"info.lang": "en"} back to
+    {"info": {"lang": "en"}}.
+
+    Args:
+        flat_metadata: Flattened metadata with dot-notation keys
+        sep: Separator used in keys (default ".")
+
+    Returns:
+        Nested metadata dictionary
+
+    Examples:
+        >>> unflatten_metadata({"info.lang": "en", "info.tier": "gold"})
+        {"info": {"lang": "en", "tier": "gold"}}
+    """
+    result: Dict[str, Any] = {}
+    for key, value in flat_metadata.items():
+        parts = key.split(sep)
+        current = result
+        for part in parts[:-1]:
+            if part not in current:
+                current[part] = {}
+            current = current[part]
+        current[parts[-1]] = value
+    return result

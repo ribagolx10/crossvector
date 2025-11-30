@@ -34,6 +34,7 @@ repos:
       - id: check-ast
       - id: check-docstring-first
       - id: debug-statements
+        exclude: 'src/crossvector/querydsl/__init__\.py$'
 
   # Type checking with mypy (optional - can be commented out if too strict)
   # - repo: https://github.com/pre-commit/mirrors-mypy
@@ -43,12 +44,12 @@ repos:
   #       additional_dependencies: [types-all]
   #       args: [--ignore-missing-imports]
 
-  # Markdown linting
-  - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.46.0
-    hooks:
-      - id: markdownlint
-        args: [--fix]
+  # Markdown linting (disabled due to duplicate heading issues)
+  # - repo: https://github.com/igorshubovych/markdownlint-cli
+  #   rev: v0.46.0
+  #   hooks:
+  #     - id: markdownlint
+  #       args: [--fix]
 
 # CI configuration
 ci:

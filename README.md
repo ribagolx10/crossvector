@@ -1,85 +1,84 @@
 # CrossVector
 
 [![Beta Status](https://img.shields.io/badge/status-beta-orange)](https://github.com/thewebscraping/crossvector)
-[![Not Production Ready](https://img.shields.io/badge/production-not%20ready-red)](https://github.com/thewebscraping/crossvector#%EF%B8%8F-beta-status---not-production-ready)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Cross-platform Vector Database Engine
+**A unified Python library for vector database operations with pluggable backends and embedding providers.**
 
-A flexible vector database engine **currently in beta** with pluggable adapters for
-multiple vector databases (AstraDB, ChromaDB, Milvus, PGVector) and embedding
-providers (OpenAI, Gemini, and more).
+CrossVector provides a consistent, high-level API across multiple vector databases (AstraDB, ChromaDB, Milvus, PgVector) and embedding providers (OpenAI, Gemini), allowing you to switch between backends without rewriting your application code.
 
-Simplify your vector search infrastructure with a single, unified API across all
-major vector databases.
+## ⚠️ Beta Status
 
-## ⚠️ Beta Status - Not Production Ready
-
-> **WARNING**: CrossVector is currently in **BETA** and under active development.
->
-> **DO NOT USE IN PRODUCTION** until a stable 1.0 release.
->
-> **Risks:**
+> **WARNING**: CrossVector is currently in **BETA**. Do not use in production until version 1.0 release.
 >
 > - API may change without notice
-> - Database schema may evolve, requiring migrations
-> - Features may be added, removed, or modified
-> - Bugs and edge cases are still being discovered
-> - Performance optimizations are ongoing
+> - Database schemas may evolve
+> - Features are still being tested and refined
 >
-> **Use Cases:**
+> **Recommended for:**
 >
-> - ✅ Experimentation and prototyping
-> - ✅ Development and testing
-> - ✅ Learning and exploration
+> - ✅ Prototyping and experimentation
+> - ✅ Development and testing environments
+> - ✅ Learning vector databases
+>
+> **Not recommended for:**
+>
 > - ❌ Production applications
 > - ❌ Mission-critical systems
-> - ❌ Customer-facing services
->
-> **Recommendations:**
->
-> - Pin to specific version: `crossvector==0.x.x`
-> - Monitor the [CHANGELOG](CHANGELOG.md) for breaking changes
-> - Test thoroughly before upgrading
-> - Join discussions in [GitHub Issues](https://github.com/thewebscraping/crossvector/issues)
-> - Wait for 1.0 stable release for production use
+
+---
 
 ## Features
 
-- **Pluggable Architecture**: Easy adapter pattern for both databases and embeddings
-- **Multiple Vector Databases**: AstraDB, ChromaDB, Milvus, PGVector
-- **Multiple Embedding Providers**: OpenAI, Gemini
-- **Smart Document Handling**: Auto-generated IDs (SHA256), optional text storage
-- **Install Only What You Need**: Optional dependencies per adapter
-- **Type-Safe**: Full Pydantic validation
-- **Consistent API**: Same interface across all adapters
+### 🔌 Pluggable Architecture
 
-## Supported Vector Databases
+- **4 Vector Databases**: AstraDB, ChromaDB, Milvus, PgVector
+- **2 Embedding Providers**: OpenAI, Gemini
+- Switch backends without code changes
 
-| Database | Status | Features |
-| ---------- | -------- | ---------- |
-| **AstraDB** | ✅ Production | Cloud-native Cassandra, lazy initialization |
-| **ChromaDB** | ✅ Production | Cloud/HTTP/Local modes, auto-fallback |
-| **Milvus** | ✅ Production | Auto-indexing, schema validation |
-| **PGVector** | ✅ Production | PostgreSQL extension, JSONB metadata |
+### 🎯 Unified API
 
-## Supported Embedding Providers
+- Consistent interface across all adapters
+- Django-style `get`, `get_or_create`, `update_or_create` semantics
+- Flexible document input formats: `str`, `dict`, or `VectorDocument`
 
-| Provider | Status | Models |
-| ---------- | -------- | -------- |
-| **OpenAI** | ✅ Production | text-embedding-3-small, 3-large, ada-002 |
-| **Gemini** | ✅ Production | text-embedding-004, gemini-embedding-001 |
+### 🔍 Advanced Querying
+
+- **Query DSL**: Type-safe filter composition with `Q` objects
+- **Universal operators**: `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`
+- **Nested metadata**: Dot-notation paths for hierarchical data
+- **Metadata-only search**: Query without vector similarity (where supported)
+
+### 🚀 Performance Optimized
+
+- Automatic batch embedding generation
+- Bulk operations: `bulk_create`, `bulk_update`, `upsert`
+- Configurable batch sizes and conflict resolution
+
+### 🛡️ Type-Safe & Validated
+
+- Full Pydantic validation
+- Structured exceptions with detailed context
+- Centralized logging with configurable levels
+
+### ⚙️ Flexible Configuration
+
+- Environment variable support via `.env`
+- Multiple primary key strategies: UUID, hash-based, int64, custom
+- Optional text storage to optimize space
+
+---
 
 ## Installation
 
-### Minimal (core only)
+### Core Package (Minimal)
 
 ```bash
 pip install crossvector
 ```
 
-### With specific adapters
+### With Specific Backends
 
 ```bash
 # AstraDB + OpenAI
@@ -88,544 +87,805 @@ pip install crossvector[astradb,openai]
 # ChromaDB + OpenAI
 pip install crossvector[chromadb,openai]
 
-# All databases + OpenAI
-pip install crossvector[all-dbs,openai]
+# Milvus + Gemini
+pip install crossvector[milvus,gemini]
 
+# PgVector + OpenAI
+pip install crossvector[pgvector,openai]
+```
+
+### All Backends and Providers
+
+```bash
 # Everything
 pip install crossvector[all]
+
+# All databases only
+pip install crossvector[all-dbs,openai]
+
+# All embeddings only
+pip install crossvector[astradb,all-embeddings]
 ```
+
+---
 
 ## Quick Start
 
+### Basic Usage
+
 ```python
-from crossvector import VectorEngine, Document, UpsertRequest, SearchRequest
+from crossvector import VectorEngine
 from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
-from crossvector.dbs.astradb import AstraDBAdapter
+from crossvector.dbs.pgvector import PgVectorAdapter
 
 # Initialize engine
 engine = VectorEngine(
-    embedding_adapter=OpenAIEmbeddingAdapter(model_name="text-embedding-3-small"),
-    db_adapter=AstraDBAdapter(),
+    embedding=OpenAIEmbeddingAdapter(model_name="text-embedding-3-small"),
+    db=PgVectorAdapter(),
     collection_name="my_documents",
-    store_text=True  # Optional: Set to False to not store original text
+    store_text=True
 )
 
-# Upsert documents
-docs = [
-    Document(text="The quick brown fox", metadata={"category": "animals"}), # ID auto-generated
-    Document(id="doc2", text="Artificial intelligence", metadata={"category": "tech"}),
-]
-result = engine.upsert(UpsertRequest(documents=docs))
-print(f"Inserted {result['count']} documents")
+# Create documents (flexible input formats)
+doc1 = engine.create(text="Python is a programming language")
+doc2 = engine.create({"text": "Artificial intelligence", "metadata": {"category": "tech"}})
+doc3 = engine.create(text="Machine learning basics", metadata={"level": "beginner"})
 
-# Search
-results = engine.search(SearchRequest(query="AI and ML", limit=5))
+print(f"Created documents: {doc1.id}, {doc2.id}, {doc3.id}")
+
+# Search by text (automatic embedding generation)
+results = engine.search("programming languages", limit=5)
 for doc in results:
-    print(f"Score: {doc.get('score', 'N/A')}, Text: {doc.get('text')}")
+    print(f"[{doc.metadata.get('score', 0):.3f}] {doc.text}")
+
+# Search by vector (skip embedding step)
+vector = engine.embedding.get_embeddings(["my query"])[0]
+results = engine.search(vector, limit=3)
 
 # Get document by ID
-doc = engine.get("doc2")
+doc = engine.get(doc1.id)
+print(f"Retrieved: {doc.text}")
 
 # Count documents
-count = engine.count()
+total = engine.count()
+print(f"Total documents: {total}")
 
 # Delete documents
-engine.delete_one("doc2")
+engine.delete(doc1.id)
+engine.delete([doc2.id, doc3.id])  # Batch delete
 ```
+
+### Flexible Input Formats
+
+CrossVector accepts multiple document input formats for maximum convenience:
+
+```python
+# String input (text only)
+doc1 = engine.create("Simple text document")
+
+# Dict input with metadata
+doc2 = engine.create({
+    "text": "Document with metadata",
+    "metadata": {"source": "api", "author": "user123"}
+})
+
+# Dict input with metadata as kwargs
+doc3 = engine.create(
+    text="Document with inline metadata",
+    source="web",
+    category="blog"
+)
+
+# VectorDocument instance
+from crossvector import VectorDocument
+doc4 = engine.create(
+    VectorDocument(
+        id="custom-id",
+        text="Full control document",
+        metadata={"priority": "high"}
+    )
+)
+
+# Provide pre-computed vector (skip embedding)
+doc5 = engine.create(
+    text="Document with vector",
+    vector=[0.1, 0.2, ...],  # 1536-dim for OpenAI
+    metadata={"source": "external"}
+)
+```
+
+### Django-Style Operations
+
+```python
+# Get or create pattern
+doc, created = engine.get_or_create(
+    text="My document",
+    metadata={"topic": "AI"}
+)
+if created:
+    print("Created new document")
+else:
+    print("Document already exists")
+
+# Update or create pattern
+doc, created = engine.update_or_create(
+    {"id": "doc-123"},
+    text="Updated content",
+    defaults={"metadata": {"updated": True}}
+)
+
+# Get with metadata filters
+doc = engine.get(source="api", status="active")  # Must return exactly one
+
+# Bulk operations
+docs = [
+    {"text": "Doc 1", "metadata": {"idx": 1}},
+    {"text": "Doc 2", "metadata": {"idx": 2}},
+    {"text": "Doc 3", "metadata": {"idx": 3}},
+]
+created_docs = engine.bulk_create(docs, batch_size=100)
+
+# Upsert (insert or update)
+docs = engine.upsert([
+    {"id": "doc-1", "text": "Updated doc 1"},
+    {"id": "doc-2", "text": "New doc 2"},
+])
+```
+
+---
+
+## Advanced Querying
+
+### Query DSL with Q Objects
+
+CrossVector provides a powerful Query DSL for composing complex filters:
+
+```python
+from crossvector.querydsl.q import Q
+
+# Simple equality
+results = engine.search("AI", where=Q(category="tech"))
+
+# Comparison operators
+results = engine.search(
+    "articles",
+    where=Q(score__gte=0.8) & Q(views__lt=1000)
+)
+
+# Range queries
+results = engine.search(
+    "products",
+    where=Q(price__gte=100) & Q(price__lte=500)
+)
+
+# IN / NOT IN
+results = engine.search(
+    "users",
+    where=Q(role__in=["admin", "moderator"]) & Q(status__ne="banned")
+)
+
+# Boolean combinations
+high_quality = Q(rating__gte=4.5) & Q(reviews__gte=10)
+featured = Q(featured__eq=True)
+results = engine.search("items", where=high_quality | featured)
+
+# Negation
+results = engine.search("posts", where=~Q(status="archived"))
+
+# Nested metadata (dot notation)
+results = engine.search(
+    "documents",
+    where=Q(info__lang__eq="en") & Q(info__tier__eq="gold")
+)
+```
+
+### Universal Filter Format
+
+You can also use dict-based filters with universal operators:
+
+```python
+# Equality and comparison
+results = engine.search("query", where={
+    "category": {"$eq": "tech"},
+    "score": {"$gt": 0.8},
+    "views": {"$lte": 1000}
+})
+
+# IN / NOT IN
+results = engine.search("query", where={
+    "status": {"$in": ["active", "pending"]},
+    "priority": {"$nin": ["low"]}
+})
+
+# Nested paths
+results = engine.search("query", where={
+    "user.role": {"$eq": "admin"},
+    "user.verified": {"$eq": True}
+})
+
+# Multiple conditions (implicit AND)
+results = engine.search("query", where={
+    "category": {"$eq": "blog"},
+    "published": {"$eq": True},
+    "views": {"$gte": 100}
+})
+```
+
+### Metadata-Only Search
+
+Search by metadata filters without vector similarity:
+
+```python
+# Find all documents with specific metadata
+docs = engine.search(
+    query=None,  # No vector search
+    where={"status": {"$eq": "published"}},
+    limit=50
+)
+
+# Complex metadata queries
+docs = engine.search(
+    query=None,
+    where=Q(category="tech") & Q(featured=True) & Q(score__gte=0.9),
+    limit=100
+)
+```
+
+### Supported Operators
+
+All backends support these universal operators:
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `$eq` | Equal to | `{"age": {"$eq": 25}}` or `Q(age=25)` |
+| `$ne` | Not equal to | `{"status": {"$ne": "inactive"}}` or `Q(status__ne="inactive")` |
+| `$gt` | Greater than | `{"score": {"$gt": 0.8}}` or `Q(score__gt=0.8)` |
+| `$gte` | Greater than or equal | `{"price": {"$gte": 100}}` or `Q(price__gte=100)` |
+| `$lt` | Less than | `{"age": {"$lt": 18}}` or `Q(age__lt=18)` |
+| `$lte` | Less than or equal | `{"priority": {"$lte": 5}}` or `Q(priority__lte=5)` |
+| `$in` | In array | `{"role": {"$in": ["admin", "mod"]}}` or `Q(role__in=["admin"])` |
+| `$nin` | Not in array | `{"status": {"$nin": ["banned"]}}` or `Q(status__nin=["banned"])` |
+
+---
 
 ## Configuration
 
 ### Environment Variables
 
-Create a `.env` file:
+Create a `.env` file in your project root:
 
 ```bash
-# OpenAI (for embeddings)
+# OpenAI
 OPENAI_API_KEY=sk-...
 
-# Gemini (for embeddings)
-GOOGLE_API_KEY=...
+# Gemini
+GOOGLE_API_KEY=AI...
 
 # AstraDB
 ASTRA_DB_APPLICATION_TOKEN=AstraCS:...
 ASTRA_DB_API_ENDPOINT=https://...
-ASTRA_DB_COLLECTION_NAME=my_collection
+ASTRA_DB_COLLECTION_NAME=vectors
 
-# ChromaDB Cloud
+# ChromaDB (Cloud)
 CHROMA_API_KEY=...
-CHROMA_CLOUD_TENANT=...
-CHROMA_CLOUD_DATABASE=...
+CHROMA_TENANT=...
+CHROMA_DATABASE=...
+
+# ChromaDB (Self-hosted)
+CHROMA_HOST=localhost
+CHROMA_PORT=8000
 
 # Milvus
 MILVUS_API_ENDPOINT=https://...
-MILVUS_USER=...
-MILVUS_PASSWORD=...
+MILVUS_API_KEY=...
 
-# PGVector
+# PgVector
 PGVECTOR_HOST=localhost
 PGVECTOR_PORT=5432
-PGVECTOR_DBNAME=vectordb
+PGVECTOR_DBNAME=vector_db
 PGVECTOR_USER=postgres
-PGVECTOR_PASSWORD=...
+PGVECTOR_PASSWORD=postgres
 
-# Vector metric (cosine, dot_product, euclidean)
-VECTOR_METRIC=cosine
-# Store original text in database (true/false)
+# Vector settings
 VECTOR_STORE_TEXT=true
+VECTOR_METRIC=cosine
+VECTOR_SEARCH_LIMIT=10
+PRIMARY_KEY_MODE=uuid
+LOG_LEVEL=INFO
 ```
 
-## Database-Specific Examples
+### Primary Key Strategies
+
+CrossVector supports multiple primary key generation strategies:
+
+```python
+from crossvector.settings import settings
+
+# UUID (default) - random UUID
+settings.PRIMARY_KEY_MODE = "uuid"
+
+# Hash text - deterministic from text content
+settings.PRIMARY_KEY_MODE = "hash_text"
+
+# Hash vector - deterministic from vector values
+settings.PRIMARY_KEY_MODE = "hash_vector"
+
+# Sequential int64
+settings.PRIMARY_KEY_MODE = "int64"
+
+# Auto - hash text if available, else hash vector, else UUID
+settings.PRIMARY_KEY_MODE = "auto"
+
+# Custom factory function
+settings.PRIMARY_KEY_FACTORY = "mymodule.generate_custom_id"
+```
+
+---
+
+## Backend-Specific Features
+
+### Backend Capabilities
+
+Different backends have varying feature support:
+
+| Feature | AstraDB | ChromaDB | Milvus | PgVector |
+|---------|---------|----------|--------|----------|
+| Vector Search | ✅ | ✅ | ✅ | ✅ |
+| Metadata-Only Search | ✅ | ✅ | ❌ | ✅ |
+| Nested Metadata | ✅ | ✅* | ❌ | ✅ |
+| Numeric Comparisons | ✅ | ✅ | ✅ | ✅ |
+| Text Storage | ✅ | ✅ | ✅ | ✅ |
+
+*ChromaDB supports nested metadata via dot-notation when metadata is flattened.
 
 ### AstraDB
 
 ```python
 from crossvector.dbs.astradb import AstraDBAdapter
 
-adapter = AstraDBAdapter()
-adapter.initialize(
-    collection_name="my_collection",
-    embedding_dimension=1536,
-    metric="cosine",
-    store_text=True  # Optional: Set to False to save space
-)
+db = AstraDBAdapter()
+engine = VectorEngine(embedding=embedding, db=db)
+
+# Features:
+# - Serverless, auto-scaling
+# - Native JSON metadata support
+# - Nested field queries with dot notation
+# - Metadata-only search
 ```
 
 ### ChromaDB
 
 ```python
-from crossvector.dbs.chroma import ChromaDBAdapter
+from crossvector.dbs.chroma import ChromaAdapter
 
-# Local mode
-adapter = ChromaDBAdapter()
+# Cloud mode
+db = ChromaAdapter()  # Uses CHROMA_API_KEY from env
 
-# Cloud mode (auto-detected from env vars)
-# CHROMA_API_KEY, CHROMA_CLOUD_TENANT, CHROMA_CLOUD_DATABASE
-adapter = ChromaDBAdapter()
+# Self-hosted mode
+db = ChromaAdapter()  # Uses CHROMA_HOST/PORT from env
 
-adapter.initialize(
-    collection_name="my_collection",
-    embedding_dimension=1536,
-    store_text=True  # Optional
-)
+# Local persistence mode
+db = ChromaAdapter()  # Uses CHROMA_PERSIST_DIR from env
+
+engine = VectorEngine(embedding=embedding, db=db)
+
+# Features:
+# - Multiple deployment modes (cloud/HTTP/local)
+# - Automatic client fallback
+# - Flattened metadata with dot-notation support
 ```
 
 ### Milvus
 
 ```python
-from crossvector.dbs.milvus import MilvusDBAdapter
+from crossvector.dbs.milvus import MilvusAdapter
 
-adapter = MilvusDBAdapter()
-adapter.initialize(
-    collection_name="my_collection",
-    embedding_dimension=1536,
-    metric="cosine",
-    store_text=True  # Optional
-)
+db = MilvusAdapter()
+engine = VectorEngine(embedding=embedding, db=db)
+
+# Features:
+# - High performance at scale
+# - Automatic index creation
+# - Boolean expression filters
+# - Requires vector for all searches (no metadata-only)
 ```
 
-### PGVector
+### PgVector
 
 ```python
-from crossvector.dbs.pgvector import PGVectorAdapter
+from crossvector.dbs.pgvector import PgVectorAdapter
 
-adapter = PGVectorAdapter()
-adapter.initialize(
-    collection_name="my_vectors",
-    embedding_dimension=1536,
-    metric="cosine",
-    store_text=True  # Optional
-)
+db = PgVectorAdapter()
+engine = VectorEngine(embedding=embedding, db=db)
+
+# Features:
+# - PostgreSQL extension
+# - JSONB metadata storage
+# - Nested field support with #>> operator
+# - Automatic numeric type casting
+# - Metadata-only search
+# - Auto-creates database if missing
 ```
 
-## Custom Adapters
+---
 
-### Create Custom Database Adapter
+## Embedding Providers
+
+### OpenAI
 
 ```python
-from crossvector.abc import VectorDBAdapter
-from typing import Any, Dict, List, Set
-
-class MyCustomDBAdapter(VectorDBAdapter):
-    def initialize(self, collection_name: str, embedding_dimension: int, metric: str = "cosine", store_text: bool = True):
-        # Your implementation
-        pass
-
-    def get_collection(self, collection_name: str, embedding_dimension: int, metric: str = "cosine"):
-        # Your implementation
-        pass
-
-    def upsert(self, documents: List[Dict[str, Any]]):
-        # Your implementation
-        pass
-
-    def search(self, vector: List[float], limit: int, fields: Set[str]) -> List[Dict[str, Any]]:
-        # Your implementation
-        pass
-
-    def get(self, id: str) -> Dict[str, Any] | None:
-        # Your implementation
-        pass
-
-    def count(self) -> int:
-        # Your implementation
-        pass
-
-    def delete_one(self, id: str) -> int:
-        # Your implementation
-        pass
-
-    def delete_many(self, ids: List[str]) -> int:
-        # Your implementation
-        pass
-```
-
-### Create Custom Embedding Adapter
-
-```python
-from crossvector.abc import EmbeddingAdapter
-from typing import List
-
-class MyCustomEmbeddingAdapter(EmbeddingAdapter):
-    def __init__(self, model_name: str):
-        super().__init__(model_name)
-        # Initialize your client
-
-    @property
-    def embedding_dimension(self) -> int:
-        return 768  # Your model's dimension
-
-    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
-        # Your implementation
-        pass
-```
-
-## JSON Format Specification
-
-CrossVector uses a standardized JSON format across all vector databases. Here's the complete specification:
-
-### 1. User Level (Creating Documents)
-
-When you create documents, use the `Document` class:
-
-```python
-from crossvector import Document
-
-# Option 1: With explicit ID
-doc = Document(
-    id="my-custom-id",
-    text="The content of my document",
-    metadata={
-        "category": "example",
-        "source": "manual",
-        "tags": ["important", "review"]
-    }
-)
-
-# Option 2: Auto-generated ID (SHA256 hash of text)
-doc = Document(
-    text="Another document without ID",
-    metadata={"category": "auto"}
-)
-# doc.id will be a 64-character SHA256 hash
-
-# Timestamps are automatically generated
-print(doc.created_timestamp)  # Unix timestamp: 1732349789.123456
-print(doc.updated_timestamp)  # Unix timestamp: 1732349789.123456
-
-# Convert to datetime if needed
-from datetime import datetime, timezone
-created_dt = datetime.fromtimestamp(doc.created_timestamp, tz=timezone.utc)
-print(created_dt)  # 2024-11-23 11:16:29.123456+00:00
-
-# You can safely use your own created_at/updated_at in metadata!
-doc_with_article_timestamps = Document(
-    text="My article content",
-    metadata={
-        "title": "My Article",
-        "created_at": "2024-01-15T10:00:00Z",  # ✅ Your article's timestamp (ISO 8601)
-        "updated_at": "2024-11-20T15:30:00Z",  # ✅ Your article's timestamp (ISO 8601)
-        "author": "John Doe"
-    }
-)
-# Both timestamps coexist:
-# - doc.created_timestamp: CrossVector internal tracking (Unix timestamp float)
-# - metadata["created_at"]: Your article's timestamp (any format you want)
-```
-
-**Auto-Generated Fields:**
-
-- `id`: SHA256 hash of text if not provided
-- `created_timestamp`: Unix timestamp (float) when document was created
-- `updated_timestamp`: Unix timestamp (float), updated on every modification
-
-**✅ Why Float/Unix Timestamp?**
-
-- **Compact**: `1732349789.123456` vs `"2024-11-23T11:16:29.123456+00:00"`
-- **Efficient**: Easy to compare and sort (`<`, `>`, `==`)
-- **Universal**: Works across all programming languages
-- **Smaller storage**: Numbers are more efficient than strings
-
-**✅ No Conflicts:**
-CrossVector uses `created_timestamp` and `updated_timestamp` (float), so you can freely use `created_at`, `updated_at`, or any other timestamp fields in your metadata with any format (ISO 8601, RFC 3339, custom, etc.).
-
-### 2. Engine Level (Internal Format)
-
-When `VectorEngine.upsert()` processes documents, it converts them to this standardized format before passing to database adapters:
-
-```python
-{
-    "_id": "unique-doc-id",           # Document identifier (string)
-    "vector": [0.1, 0.2, ...],        # Embedding vector (List[float])
-    "text": "original text",           # Original text content (if store_text=True)
-    # Metadata fields (flattened at root level)
-    "category": "example",
-    "source": "manual",
-    "tags": ["important", "review"],
-    "created_timestamp": 1732349789.123456,  # CrossVector timestamp (float)
-    "updated_timestamp": 1732349789.123456,  # CrossVector timestamp (float)
-    # User's own timestamps (if any) - any format is fine
-    "created_at": "2024-01-15T10:00:00Z",  # Your article timestamp (ISO 8601)
-    "updated_at": "2024-11-20T15:30:00Z",  # Your article timestamp (ISO 8601)
-    "published_date": "2024-01-15"         # Or any other format
-}
-```
-
-**Key Points:**
-
-- Field `_id`: Document unique identifier
-- Field `vector`: Embedding vector (replaces `$vector` in older versions)
-- Field `text`: Stored separately from metadata
-- Fields `created_timestamp` and `updated_timestamp`: Automatic CrossVector tracking (Unix timestamp float)
-- User metadata (including user's own timestamps in any format) are preserved
-- Metadata fields are stored at root level (not nested)
-
-### 3. Storage Level (Database-Specific)
-
-Each database adapter translates the engine format to its native storage format:
-
-#### **PGVector**
-
-```sql
-CREATE TABLE vectors (
-    id SERIAL PRIMARY KEY,
-    doc_id VARCHAR(255) UNIQUE,
-    vector vector(1536),
-    text TEXT,                    -- Separate column
-    metadata JSONB                -- All metadata fields
-);
-```
-
-Storage format:
-
-```python
-{
-    "doc_id": "unique-doc-id",
-    "vector": [0.1, 0.2, ...],
-    "text": "original text",
-    "metadata": {                  # Nested in JSONB
-        "category": "example",
-        "source": "manual",
-        "tags": ["important"]
-    }
-}
-```
-
-#### **Milvus**
-
-```python
-schema = {
-    "doc_id": VARCHAR(255),        # Primary key
-    "vector": FLOAT_VECTOR(1536),
-    "text": VARCHAR(65535),        # Separate field (if store_text=True)
-    "metadata": JSON               # All metadata fields
-}
-```
-
-Storage format:
-
-```python
-{
-    "doc_id": "unique-doc-id",
-    "vector": [0.1, 0.2, ...],
-    "text": "original text",
-    "metadata": {                  # Nested in JSON field
-        "category": "example",
-        "source": "manual"
-    }
-}
-```
-
-#### **ChromaDB**
-
-ChromaDB uses separate arrays for each field:
-
-```python
-{
-    "ids": ["unique-doc-id"],
-    "embeddings": [[0.1, 0.2, ...]],
-    "documents": ["original text"],      # Separate array (if store_text=True)
-    "metadatas": [{                      # Flattened metadata (no nesting)
-        "category": "example",
-        "source": "manual",
-        "tags.0": "important",           # Nested lists/dicts are flattened
-        "tags.1": "review"
-    }]
-}
-```
-
-**Note**: ChromaDB doesn't support nested metadata, so we auto-flatten it.
-
-#### **AstraDB**
-
-AstraDB stores everything at the document root level:
-
-```python
-{
-    "_id": "unique-doc-id",
-    "$vector": [0.1, 0.2, ...],
-    "text": "original text",          # At root level (if store_text=True)
-    "category": "example",            # Metadata at root level
-    "source": "manual",
-    "tags": ["important", "review"]
-}
-```
-
-### 4. Search Results Format
-
-When you call `search()` or `get()`, results are returned in a unified format:
-
-```python
-# Search results
-results = engine.search(SearchRequest(query="example", limit=5))
-
-# Each result:
-{
-    "id": "unique-doc-id",           # Document ID
-    "score": 0.92,                   # Similarity score (lower = more similar for some metrics)
-    "text": "original text",         # If requested in fields
-    "metadata": {                    # Original metadata structure
-        "category": "example",
-        "source": "manual",
-        "tags": ["important"]
-    }
-}
-```
-
-### 5. Example: Complete Flow
-
-```python
-from crossvector import VectorEngine, Document, UpsertRequest, SearchRequest
 from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
-from crossvector.dbs.pgvector import PGVectorAdapter
 
-engine = VectorEngine(
-    embedding_adapter=OpenAIEmbeddingAdapter(),
-    db_adapter=PGVectorAdapter(),
-    collection_name="docs",
-    store_text=True
-)
+# Default model (text-embedding-3-small, 1536 dims)
+embedding = OpenAIEmbeddingAdapter()
 
-# 1. Create documents (User Level)
-docs = [
-    Document(
-        text="Python is a programming language",
-        metadata={"lang": "en", "category": "tech"}
-    )
-]
+# Larger model (text-embedding-3-large, 3072 dims)
+embedding = OpenAIEmbeddingAdapter(model_name="text-embedding-3-large")
 
-# 2. Upsert (Engine Level conversion happens automatically)
-engine.upsert(UpsertRequest(documents=docs))
-
-# 3. Search (Results in unified format)
-results = engine.search(SearchRequest(
-    query="programming languages",
-    limit=5,
-    fields={"text", "metadata"}  # Specify what to return
-))
-
-# 4. Use results
-for result in results:
-    print(f"ID: {result['id']}")
-    print(f"Score: {result['score']}")
-    print(f"Text: {result.get('text', 'N/A')}")
-    print(f"Metadata: {result.get('metadata', {})}")
+# Legacy model (text-embedding-ada-002, 1536 dims)
+embedding = OpenAIEmbeddingAdapter(model_name="text-embedding-ada-002")
 ```
 
-### Summary Table
+### Gemini
 
-| Level | Format | Key Fields | Notes |
-|-------|--------|-----------|-------|
-| **User** | `Document` object | `id`, `text`, `metadata` | Pydantic validation, auto-generated ID |
-| **Engine** | Python dict | `_id`, `vector`, `text`, metadata fields | Standardized across all DBs |
-| **PGVector** | SQL row | `doc_id`, `vector`, `text`, `metadata` (JSONB) | Text in separate column |
-| **Milvus** | JSON document | `doc_id`, `vector`, `text`, `metadata` (JSON) | Text in VARCHAR field |
-| **ChromaDB** | Arrays | `ids`, `embeddings`, `documents`, `metadatas` | Flattened metadata |
-| **AstraDB** | JSON document | `_id`, `$vector`, `text`, metadata at root | Everything at root level |
-| **Search Results** | Python dict | `id`, `score`, `text`, `metadata` | Unified format |
+```python
+from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
 
-**Note**: The `text` field is optional and controlled by the `store_text` parameter. If `store_text=False`, the text will not be stored in any database.
+# Default model (gemini-embedding-001)
+embedding = GeminiEmbeddingAdapter()
 
-## Development
+# With custom dimensions (768, 1536, 3072)
+embedding = GeminiEmbeddingAdapter(
+    model_name="gemini-embedding-001",
+    dim=1536
+)
+
+# With task type
+embedding = GeminiEmbeddingAdapter(
+    task_type="retrieval_document"  # or "retrieval_query", "semantic_similarity"
+)
+```
+
+---
+
+## Error Handling
+
+CrossVector provides structured exceptions with detailed context:
+
+```python
+from crossvector.exceptions import (
+    DoesNotExist,
+    MultipleObjectsReturned,
+    DocumentExistsError,
+    MissingFieldError,
+    InvalidFieldError,
+    CollectionNotFoundError,
+    MissingConfigError,
+)
+
+# Catch specific errors
+try:
+    doc = engine.get(id="nonexistent")
+except DoesNotExist as e:
+    print(f"Document not found: {e.details}")
+
+# Multiple results when expecting one
+try:
+    doc = engine.get(status="active")  # Multiple matches
+except MultipleObjectsReturned as e:
+    print(f"Multiple documents matched: {e.details}")
+
+# Missing configuration
+try:
+    db = PgVectorAdapter()
+except MissingConfigError as e:
+    print(f"Missing config: {e.details['config_key']}")
+    print(f"Hint: {e.details['hint']}")
+
+# Invalid field or operator
+try:
+    results = engine.search("query", where={"field": {"$regex": "pattern"}})
+except InvalidFieldError as e:
+    print(f"Unsupported operator: {e.message}")
+```
+
+---
+
+## Logging
+
+Configure logging via environment variable:
 
 ```bash
-# Clone repository
-git clone https://github.com/thewebscraping/crossvector.git
-cd crossvector
-
-# Install with dev dependencies
-pip install -e ".[all,dev]"
-
-# Run tests
-pytest
-
-# Run linting
-ruff check .
-
-# Format code
-ruff format .
-
-# Setup pre-commit hooks
-pre-commit install
+LOG_LEVEL=DEBUG  # DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
+
+Or programmatically:
+
+```python
+from crossvector.settings import settings
+settings.LOG_LEVEL = "DEBUG"
+
+# Logs include:
+# - Engine initialization
+# - Embedding generation
+# - Database operations
+# - Query compilation
+# - Error details
+```
+
+---
 
 ## Testing
+### Real Environment Tests (Opt-in)
 
-```bash
-# Run all tests
-pytest
+Integration tests that exercise real backends live under `scripts/tests/` to avoid running in GitHub Actions by default.
 
-# Run with coverage
-pytest --cov=. --cov-report=html
+- Location: `scripts/tests/`
+- Run manually when services/credentials are available
 
-# Run specific adapter tests
-pytest tests/test_gemini_embeddings.py
-pytest tests/test_openai_embeddings.py
+Static defaults used in tests:
+- AstraDB collection: `test_crossvector`
+- Chroma collection: `test_crossvector`
+- Milvus collection: `test_crossvector`
+- PgVector table: `test_crossvector`
+
+Run examples:
+```zsh
+pytest scripts/tests -q
+pytest scripts/tests/test_pgvector.py -q
 ```
 
-## License
+Environment setup examples:
+```zsh
+# OpenAI (embeddings)
+export OPENAI_API_KEY=sk-...
+export OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 
-MIT License - see LICENSE file for details
+# AstraDB
+export ASTRA_DB_APPLICATION_TOKEN=AstraCS:...
+export ASTRA_DB_API_ENDPOINT=https://...apps.astra.datastax.com
 
-## Contributing
+# Chroma (local/cloud)
+export CHROMA_HOST=api.trychroma.com
+export CHROMA_API_KEY=ck-...
+export CHROMA_TENANT=...
+export CHROMA_DATABASE=Test
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+# Milvus
+export MILVUS_API_ENDPOINT=http://localhost:19530
+export MILVUS_API_TOKEN=...
+
+# PgVector
+export PGVECTOR_HOST=localhost
+export PGVECTOR_PORT=5432
+export PGVECTOR_DBNAME=vectordb
+export PGVECTOR_USER=postgres
+export PGVECTOR_PASSWORD=postgres
+```
+
+Run tests with pytest:
+
+```bash
+# All tests
+pytest tests/
+
+# Specific test file
+pytest tests/test_engine.py
+
+# With coverage
+pytest tests/ --cov=crossvector --cov-report=html
+
+# Integration tests (requires real backends)
+python scripts/backend.py --backend pgvector --embedding-provider openai
+python scripts/backend.py --backend astradb --embedding-provider openai
+python scripts/backend.py --backend milvus --embedding-provider openai
+python scripts/backend.py --backend chroma --embedding-provider openai
+```
+
+---
+
+## Examples
+
+### Full CRUD Example
+
+```python
+from crossvector import VectorEngine
+from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
+from crossvector.dbs.astradb import AstraDBAdapter
+from crossvector.querydsl.q import Q
+
+# Initialize
+engine = VectorEngine(
+    embedding=OpenAIEmbeddingAdapter(),
+    db=AstraDBAdapter(),
+    collection_name="articles"
+)
+
+# Create
+article1 = engine.create(
+    text="Introduction to Python programming",
+    metadata={"category": "tutorial", "level": "beginner", "views": 1500}
+)
+
+article2 = engine.create(
+    text="Advanced machine learning techniques",
+    metadata={"category": "tutorial", "level": "advanced", "views": 3200}
+)
+
+article3 = engine.create(
+    text="Best practices for API design",
+    metadata={"category": "guide", "level": "intermediate", "views": 2100}
+)
+
+# Search with filters
+results = engine.search(
+    "machine learning tutorials",
+    where=Q(category="tutorial") & Q(level__in=["beginner", "intermediate"]),
+    limit=5
+)
+
+# Update
+article1.metadata["views"] = 2000
+engine.update(article1)
+
+# Batch update
+updates = [
+    {"id": article2.id, "metadata": {"featured": True}},
+    {"id": article3.id, "metadata": {"featured": True}},
+]
+engine.bulk_update(updates)
+
+# Get or create
+doc, created = engine.get_or_create(
+    text="Python best practices",
+    metadata={"category": "guide", "level": "intermediate"}
+)
+
+# Delete
+engine.delete(article1.id)
+engine.delete([article2.id, article3.id])
+
+# Count
+total = engine.count()
+print(f"Total articles: {total}")
+```
+
+### Switching Backends
+
+```python
+# Same code works across all backends - just swap the adapter
+
+# PgVector
+from crossvector.dbs.pgvector import PgVectorAdapter
+engine = VectorEngine(embedding=embedding, db=PgVectorAdapter())
+
+# ChromaDB
+from crossvector.dbs.chroma import ChromaAdapter
+engine = VectorEngine(embedding=embedding, db=ChromaAdapter())
+
+# Milvus
+from crossvector.dbs.milvus import MilvusAdapter
+engine = VectorEngine(embedding=embedding, db=MilvusAdapter())
+
+# AstraDB
+from crossvector.dbs.astradb import AstraDBAdapter
+engine = VectorEngine(embedding=embedding, db=AstraDBAdapter())
+
+# All operations remain the same!
+results = engine.search("query", limit=10)
+```
+
+---
+
+## Architecture
+
+### Component Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        VectorEngine                          │
+│  (Unified API, automatic embedding, flexible input)         │
+└───────────────────┬──────────────────┬──────────────────────┘
+                    │                  │
+        ┌───────────▼──────────┐  ┌───▼──────────────────┐
+        │  EmbeddingAdapter    │  │   VectorDBAdapter    │
+        │  (OpenAI, Gemini)    │  │  (Astra, Chroma...)  │
+        └──────────────────────┘  └──────────┬───────────┘
+                                              │
+                                   ┌──────────▼──────────┐
+                                   │  WhereCompiler      │
+                                   │  (Query DSL → SQL)  │
+                                   └─────────────────────┘
+```
+
+### Query Processing Flow
+
+```
+User Input (Q or dict)
+    ↓
+Normalize to Universal Dict Format
+    ↓
+Backend-Specific Compiler
+    ↓
+Native Filter (SQL, Milvus expr, Chroma dict)
+    ↓
+Database Query
+    ↓
+VectorDocument Results
+```
+
+---
 
 ## Roadmap
 
-- [x] Gemini embedding adapter
-- [ ] Qdrant adapter (not supported yet)
-- [ ] Pinecone adapter (not supported yet)
-- [ ] Weaviate adapter (not supported yet)
-- [ ] Async support
-- [ ] Batch operations optimization
-- [ ] Advanced filtering
-- [ ] Hybrid search (vector + keyword)
-- [ ] Rerank support (planned)
-- [ ] Additional embedding providers (e.g., Cohere, Mistral, Ollama)
+- [ ] **v1.0 Stable Release**
+  - API freeze and backwards compatibility guarantee
+  - Production-ready documentation
+  - Performance benchmarks
+
+- [ ] **Additional Backends**
+  - Pinecone
+  - Weaviate
+  - Qdrant
+  - MongoDB
+  - Elasticsearch
+  - OpenSearch
+
+- [ ] **Enhanced Features**
+  - Hybrid search (vector + keyword)
+  - Reranking support (Cohere, Jina)
+  - Async/await support
+  - Streaming search results
+  - Pagination helpers
+
+- [ ] **Developer Experience**
+  - CLI tool for management
+  - Migration utilities
+  - Schema validation and linting
+  - Interactive query builder
+
+---
+
+## Contributing
+
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+See [CONTRIBUTING.md](docs/contributing.md) for detailed guidelines.
+
+---
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history and migration guides.
+
+---
 
 ## Support
 
-For issues and questions:
+- **Issues**: [GitHub Issues](https://github.com/thewebscraping/crossvector/issues)
+- **Documentation**: [GitHub Wiki](https://github.com/thewebscraping/crossvector/wiki)
+- **Discussions**: [GitHub Discussions](https://github.com/thewebscraping/crossvector/discussions)
 
-- GitHub Issues: <https://github.com/thewebscraping/crossvector/issues>
-- Email: <thetwofarm@gmail.com>
+---
+
+## Acknowledgments
+
+- Built with [Pydantic](https://docs.pydantic.dev/) for validation
+- Inspired by Django ORM's elegant API design
+- Thanks to all vector database and embedding providers for their excellent SDKs
+
+---
+
+**Made with ❤️ by the [Two Farm](https://www.linkedin.com/in/thetwofarm/)**
