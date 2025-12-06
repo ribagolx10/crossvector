@@ -174,7 +174,7 @@ print(f"Total documents: {total}")
 
 # Delete documents
 engine.delete(doc1.id)
-engine.delete([doc2.id, doc3.id])  # Batch delete
+engine.delete(doc2.id, doc3.id)  # Batch delete
 ```
 
 ### Flexible Input Formats
@@ -573,7 +573,7 @@ GEMINI_API_KEY=AI...  # Get free key at https://makersuite.google.com/app/apikey
 ```
 
 **Supported Models:**
-- `gemini-embedding-001` (1536 dims, **recommended**)
+- `gemini-embedding-001` (768 dims, **recommended**)
 - `models/text-embedding-004` (768 dims)
 
 ### OpenAI (Alternative)
@@ -787,17 +787,21 @@ The benchmark tool measures performance across 7 key operations:
 ### Supported Embeddings
 
 - **OpenAI** - `text-embedding-3-small` (1536 dimensions)
-- **Gemini** - `text-embedding-004` (768 dimensions)
+- **Gemini** - `gemini-embedding-001` (1536 dimensions)
 
 ### Sample Results
 
 ```markdown
-| Backend  | Embedding | Bulk Create | Search (avg) | Update (avg) | Delete (batch) |
-|----------|-----------|-------------|--------------|--------------|----------------|
-| pgvector | openai    | 1.37s       | 434ms        | 6.20ms       | 0.54ms         |
-| pgvector | gemini    | 3.64s       | 321ms        | 3.16ms       | 0.47ms         |
-| milvus   | openai    | 0.95s       | 156ms        | 4.12ms       | 0.31ms         |
-| chroma   | gemini    | 2.14s       | 287ms        | 5.43ms       | 0.89ms         |
+| Backend | Embedding | Model | Dim | Bulk Create | Search (avg) | Update (avg) | Delete (batch) | Status |
+|---------|-----------|-------|-----|-------------|--------------|--------------|----------------|--------|
+| pgvector | openai | text-embedding-3-small | 1536 | 2.68s | 515.47ms | 6.48ms | 1.76ms | ✅ |
+| astradb | openai | text-embedding-3-small | 1536 | 32.56s | 1.09s | 875.63ms | 1.44s | ✅ |
+| milvus | openai | text-embedding-3-small | 1536 | 21.24s | 1.04s | 551.36ms | 180.25ms | ✅ |
+| chroma | openai | text-embedding-3-small | 1536 | 36.08s | 900.75ms | 2.51s | 521.35ms | ✅ |
+| pgvector | gemini | models/gemini-embedding-001 | 1536 | 31.50s | 65.29ms | 6.14ms | 1.78ms | ✅ |
+| astradb | gemini | models/gemini-embedding-001 | 1536 | 1m 2.65s | 882.48ms | 818.93ms | 1.44s | ✅ |
+| milvus | gemini | models/gemini-embedding-001 | 1536 | 50.26s | 835.50ms | 572.62ms | 224.16ms | ✅ |
+| chroma | gemini | models/gemini-embedding-001 | 1536 | 1m 3.39s | 628.08ms | 3.16s | 394.21ms | ✅ |
 ```
 
 ### Requirements
@@ -827,7 +831,7 @@ python scripts/benchmark.py --num-docs 1 --backends pgvector --embedding-provide
 python scripts/benchmark.py --num-docs 10
 
 # Step 3: Production benchmark with 1000 docs (30-60 minutes)
-python scripts/benchmark.py --num-docs 1000 --output benchmark_full.md
+python scripts/benchmark.py --num-docs 1000 --output benchmark.md
 ```
 
 ### Output
@@ -906,7 +910,7 @@ doc, created = engine.get_or_create(
 
 # Delete
 engine.delete(article1.id)
-engine.delete([article2.id, article3.id])
+engine.delete(article2.id, article3.id)
 
 # Count
 total = engine.count()
@@ -946,11 +950,11 @@ results = engine.search("query", limit=10)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        VectorEngine                          │
+│                        VectorEngine                         │
 │  (Unified API, automatic embedding, flexible input)         │
 └───────────────────┬──────────────────┬──────────────────────┘
                     │                  │
-        ┌───────────▼──────────┐  ┌───▼──────────────────┐
+        ┌───────────▼──────────┐  ┌───-▼─────────────────┐
         │  EmbeddingAdapter    │  │   VectorDBAdapter    │
         │  (OpenAI, Gemini)    │  │  (Astra, Chroma...)  │
         └──────────────────────┘  └──────────┬───────────┘
@@ -981,7 +985,7 @@ VectorDocument Results
 
 ## Roadmap
 
-- [ ] **v1.0 Stable Release**
+- [x] **v1.0 Stable Release**
   - API freeze and backwards compatibility guarantee
   - Production-ready documentation
   - Performance benchmarks

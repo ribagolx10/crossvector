@@ -1,8 +1,8 @@
 # CrossVector Benchmark Results
 
-**Generated:** 2025-12-06 13:30:02
+**Generated:** 2025-12-06 15:25:24
 
-**Documents per test:** 10
+**Documents per test:** 100
 
 ---
 
@@ -10,14 +10,14 @@
 
 | Backend | Embedding | Model | Dim | Bulk Create | Search (avg) | Update (avg) | Delete (batch) | Status |
 |---------|-----------|-------|-----|-------------|--------------|--------------|----------------|--------|
-| pgvector | openai | text-embedding-3-small | 1536 | 1.06s | 532.51ms | 8.10ms | 0.59ms | ✅ |
-| astradb | openai | text-embedding-3-small | 1536 | 4.47s | 1.02s | 795.77ms | 264.58ms | ✅ |
-| milvus | openai | text-embedding-3-small | 1536 | 4.28s | 944.09ms | 544.77ms | 171.25ms | ✅ |
-| chroma | openai | text-embedding-3-small | 1536 | 6.59s | 849.47ms | 2.33s | 406.67ms | ✅ |
-| pgvector | gemini | models/text-embedding-004 | 768 | 3.04s | 234.79ms | 3.33ms | 0.83ms | ✅ |
-| astradb | gemini | models/text-embedding-004 | 768 | 5.93s | 798.04ms | 809.51ms | 305.70ms | ✅ |
-| milvus | gemini | models/text-embedding-004 | 768 | 5.78s | 743.93ms | 557.08ms | 171.39ms | ✅ |
-| chroma | gemini | models/text-embedding-004 | 768 | 6.67s | 584.03ms | 1.94s | 402.35ms | ✅ |
+| pgvector | openai | text-embedding-3-small | 1536 | 2.68s | 515.47ms | 6.48ms | 1.76ms | ✅ |
+| astradb | openai | text-embedding-3-small | 1536 | 32.56s | 1.09s | 875.63ms | 1.44s | ✅ |
+| milvus | openai | text-embedding-3-small | 1536 | 21.24s | 1.04s | 551.36ms | 180.25ms | ✅ |
+| chroma | openai | text-embedding-3-small | 1536 | 36.08s | 900.75ms | 2.51s | 521.35ms | ✅ |
+| pgvector | gemini | models/gemini-embedding-001 | 1536 | 31.50s | 65.29ms | 6.14ms | 1.78ms | ✅ |
+| astradb | gemini | models/gemini-embedding-001 | 1536 | 1m 2.65s | 882.48ms | 818.93ms | 1.44s | ✅ |
+| milvus | gemini | models/gemini-embedding-001 | 1536 | 50.26s | 835.50ms | 572.62ms | 224.16ms | ✅ |
+| chroma | gemini | models/gemini-embedding-001 | 1536 | 1m 3.39s | 628.08ms | 3.16s | 394.21ms | ✅ |
 
 ---
 
@@ -27,40 +27,40 @@
 
 ### Bulk Create
 
-- **Duration:** 1.06s
-- **Throughput:** 9.42 docs/sec
+- **Duration:** 2.68s
+- **Throughput:** 37.32 docs/sec
 
 ### Individual Create
 
-- **Average Duration:** 476.04ms
+- **Average Duration:** 461.16ms
 - **Sample Size:** 10 documents
 
 ### Vector Search
 
-- **Average Duration:** 532.51ms
+- **Average Duration:** 515.47ms
 - **Queries Tested:** 10
 
 ### Metadata-Only Search
 
-- **Average Duration:** 0.64ms
+- **Average Duration:** 1.88ms
 - **Queries Tested:** 10
 
 ### Query DSL Operators (Q Objects)
 
-- **Average Duration:** 0.83ms
+- **Average Duration:** 1.96ms
 - **Operators Tested:** 10/10
 - **Operators:** eq, ne, gt, gte, lt, lte, in, nin, and, or
 
 ### Update Operations
 
-- **Average Duration:** 8.10ms
-- **Sample Size:** 10 documents
+- **Average Duration:** 6.48ms
+- **Sample Size:** 100 documents
 
 ### Delete Operations
 
-- **Duration:** 0.59ms
-- **Throughput:** 17091.70 docs/sec
-- **Sample Size:** 10 documents
+- **Duration:** 1.76ms
+- **Throughput:** 56918.22 docs/sec
+- **Sample Size:** 100 documents
 
 ---
 
@@ -70,40 +70,40 @@
 
 ### Bulk Create
 
-- **Duration:** 4.47s
-- **Throughput:** 2.24 docs/sec
+- **Duration:** 32.56s
+- **Throughput:** 3.07 docs/sec
 
 ### Individual Create
 
-- **Average Duration:** 1.02s
+- **Average Duration:** 1.05s
 - **Sample Size:** 10 documents
 
 ### Vector Search
 
-- **Average Duration:** 1.02s
+- **Average Duration:** 1.09s
 - **Queries Tested:** 10
 
 ### Metadata-Only Search
 
-- **Average Duration:** 528.66ms
+- **Average Duration:** 555.51ms
 - **Queries Tested:** 10
 
 ### Query DSL Operators (Q Objects)
 
-- **Average Duration:** 404.08ms
+- **Average Duration:** 588.78ms
 - **Operators Tested:** 4/4
 - **Operators:** eq, ne, gt, gte, lt, lte, in, nin, and, or
 
 ### Update Operations
 
-- **Average Duration:** 795.77ms
-- **Sample Size:** 10 documents
+- **Average Duration:** 875.63ms
+- **Sample Size:** 100 documents
 
 ### Delete Operations
 
-- **Duration:** 264.58ms
-- **Throughput:** 37.80 docs/sec
-- **Sample Size:** 10 documents
+- **Duration:** 1.44s
+- **Throughput:** 69.42 docs/sec
+- **Sample Size:** 100 documents
 
 ---
 
@@ -113,40 +113,40 @@
 
 ### Bulk Create
 
-- **Duration:** 4.28s
-- **Throughput:** 2.33 docs/sec
+- **Duration:** 21.24s
+- **Throughput:** 4.71 docs/sec
 
 ### Individual Create
 
-- **Average Duration:** 1.16s
+- **Average Duration:** 1.15s
 - **Sample Size:** 10 documents
 
 ### Vector Search
 
-- **Average Duration:** 944.09ms
+- **Average Duration:** 1.04s
 - **Queries Tested:** 10
 
 ### Metadata-Only Search
 
-- **Average Duration:** 515.74ms
+- **Average Duration:** 537.32ms
 - **Queries Tested:** 10
 
 ### Query DSL Operators (Q Objects)
 
-- **Average Duration:** 533.24ms
+- **Average Duration:** 519.36ms
 - **Operators Tested:** 4/4
 - **Operators:** eq, ne, gt, gte, lt, lte, in, nin, and, or
 
 ### Update Operations
 
-- **Average Duration:** 544.77ms
-- **Sample Size:** 10 documents
+- **Average Duration:** 551.36ms
+- **Sample Size:** 100 documents
 
 ### Delete Operations
 
-- **Duration:** 171.25ms
-- **Throughput:** 58.39 docs/sec
-- **Sample Size:** 10 documents
+- **Duration:** 180.25ms
+- **Throughput:** 554.79 docs/sec
+- **Sample Size:** 100 documents
 
 ---
 
@@ -156,212 +156,212 @@
 
 ### Bulk Create
 
-- **Duration:** 6.59s
-- **Throughput:** 1.52 docs/sec
+- **Duration:** 36.08s
+- **Throughput:** 2.77 docs/sec
 
 ### Individual Create
 
-- **Average Duration:** 1.38s
+- **Average Duration:** 1.22s
 - **Sample Size:** 10 documents
 
 ### Vector Search
 
-- **Average Duration:** 849.47ms
+- **Average Duration:** 900.75ms
 - **Queries Tested:** 10
 
 ### Metadata-Only Search
 
-- **Average Duration:** 309.60ms
+- **Average Duration:** 322.43ms
 - **Queries Tested:** 10
 
 ### Query DSL Operators (Q Objects)
 
-- **Average Duration:** 306.87ms
+- **Average Duration:** 326.25ms
 - **Operators Tested:** 10/10
 - **Operators:** eq, ne, gt, gte, lt, lte, in, nin, and, or
 
 ### Update Operations
 
-- **Average Duration:** 2.33s
-- **Sample Size:** 10 documents
+- **Average Duration:** 2.51s
+- **Sample Size:** 100 documents
 
 ### Delete Operations
 
-- **Duration:** 406.67ms
-- **Throughput:** 24.59 docs/sec
-- **Sample Size:** 10 documents
+- **Duration:** 521.35ms
+- **Throughput:** 191.81 docs/sec
+- **Sample Size:** 100 documents
 
 ---
 
 ## PGVECTOR + GEMINI Details
 
-**Embedding:** gemini - models/text-embedding-004 (768 dimensions)
+**Embedding:** gemini - models/gemini-embedding-001 (1536 dimensions)
 
 ### Bulk Create
 
-- **Duration:** 3.04s
-- **Throughput:** 3.29 docs/sec
+- **Duration:** 31.50s
+- **Throughput:** 3.17 docs/sec
 
 ### Individual Create
 
-- **Average Duration:** 246.80ms
+- **Average Duration:** 90.84ms
 - **Sample Size:** 10 documents
 
 ### Vector Search
 
-- **Average Duration:** 234.79ms
+- **Average Duration:** 65.29ms
 - **Queries Tested:** 10
 
 ### Metadata-Only Search
 
-- **Average Duration:** 0.51ms
+- **Average Duration:** 2.50ms
 - **Queries Tested:** 10
 
 ### Query DSL Operators (Q Objects)
 
-- **Average Duration:** 0.51ms
+- **Average Duration:** 1.96ms
 - **Operators Tested:** 10/10
 - **Operators:** eq, ne, gt, gte, lt, lte, in, nin, and, or
 
 ### Update Operations
 
-- **Average Duration:** 3.33ms
-- **Sample Size:** 10 documents
+- **Average Duration:** 6.14ms
+- **Sample Size:** 100 documents
 
 ### Delete Operations
 
-- **Duration:** 0.83ms
-- **Throughput:** 12035.31 docs/sec
-- **Sample Size:** 10 documents
+- **Duration:** 1.78ms
+- **Throughput:** 56178.73 docs/sec
+- **Sample Size:** 100 documents
 
 ---
 
 ## ASTRADB + GEMINI Details
 
-**Embedding:** gemini - models/text-embedding-004 (768 dimensions)
+**Embedding:** gemini - models/gemini-embedding-001 (1536 dimensions)
 
 ### Bulk Create
 
-- **Duration:** 5.93s
-- **Throughput:** 1.69 docs/sec
+- **Duration:** 1m 2.65s
+- **Throughput:** 1.60 docs/sec
 
 ### Individual Create
 
-- **Average Duration:** 819.77ms
+- **Average Duration:** 898.10ms
 - **Sample Size:** 10 documents
 
 ### Vector Search
 
-- **Average Duration:** 798.04ms
+- **Average Duration:** 882.48ms
 - **Queries Tested:** 10
 
 ### Metadata-Only Search
 
-- **Average Duration:** 531.29ms
+- **Average Duration:** 561.61ms
 - **Queries Tested:** 10
 
 ### Query DSL Operators (Q Objects)
 
-- **Average Duration:** 389.24ms
+- **Average Duration:** 521.13ms
 - **Operators Tested:** 4/4
 - **Operators:** eq, ne, gt, gte, lt, lte, in, nin, and, or
 
 ### Update Operations
 
-- **Average Duration:** 809.51ms
-- **Sample Size:** 10 documents
+- **Average Duration:** 818.93ms
+- **Sample Size:** 100 documents
 
 ### Delete Operations
 
-- **Duration:** 305.70ms
-- **Throughput:** 32.71 docs/sec
-- **Sample Size:** 10 documents
+- **Duration:** 1.44s
+- **Throughput:** 69.33 docs/sec
+- **Sample Size:** 100 documents
 
 ---
 
 ## MILVUS + GEMINI Details
 
-**Embedding:** gemini - models/text-embedding-004 (768 dimensions)
+**Embedding:** gemini - models/gemini-embedding-001 (1536 dimensions)
 
 ### Bulk Create
 
-- **Duration:** 5.78s
-- **Throughput:** 1.73 docs/sec
+- **Duration:** 50.26s
+- **Throughput:** 1.99 docs/sec
 
 ### Individual Create
 
-- **Average Duration:** 932.02ms
+- **Average Duration:** 1.06s
 - **Sample Size:** 10 documents
 
 ### Vector Search
 
-- **Average Duration:** 743.93ms
+- **Average Duration:** 835.50ms
 - **Queries Tested:** 10
 
 ### Metadata-Only Search
 
-- **Average Duration:** 511.85ms
+- **Average Duration:** 516.13ms
 - **Queries Tested:** 10
 
 ### Query DSL Operators (Q Objects)
 
-- **Average Duration:** 514.27ms
+- **Average Duration:** 514.58ms
 - **Operators Tested:** 4/4
 - **Operators:** eq, ne, gt, gte, lt, lte, in, nin, and, or
 
 ### Update Operations
 
-- **Average Duration:** 557.08ms
-- **Sample Size:** 10 documents
+- **Average Duration:** 572.62ms
+- **Sample Size:** 100 documents
 
 ### Delete Operations
 
-- **Duration:** 171.39ms
-- **Throughput:** 58.34 docs/sec
-- **Sample Size:** 10 documents
+- **Duration:** 224.16ms
+- **Throughput:** 446.10 docs/sec
+- **Sample Size:** 100 documents
 
 ---
 
 ## CHROMA + GEMINI Details
 
-**Embedding:** gemini - models/text-embedding-004 (768 dimensions)
+**Embedding:** gemini - models/gemini-embedding-001 (1536 dimensions)
 
 ### Bulk Create
 
-- **Duration:** 6.67s
-- **Throughput:** 1.50 docs/sec
+- **Duration:** 1m 3.39s
+- **Throughput:** 1.58 docs/sec
 
 ### Individual Create
 
-- **Average Duration:** 1.03s
+- **Average Duration:** 1.21s
 - **Sample Size:** 10 documents
 
 ### Vector Search
 
-- **Average Duration:** 584.03ms
+- **Average Duration:** 628.08ms
 - **Queries Tested:** 10
 
 ### Metadata-Only Search
 
-- **Average Duration:** 317.23ms
+- **Average Duration:** 345.02ms
 - **Queries Tested:** 10
 
 ### Query DSL Operators (Q Objects)
 
-- **Average Duration:** 491.17ms
+- **Average Duration:** 313.67ms
 - **Operators Tested:** 10/10
 - **Operators:** eq, ne, gt, gte, lt, lte, in, nin, and, or
 
 ### Update Operations
 
-- **Average Duration:** 1.94s
-- **Sample Size:** 10 documents
+- **Average Duration:** 3.16s
+- **Sample Size:** 100 documents
 
 ### Delete Operations
 
-- **Duration:** 402.35ms
-- **Throughput:** 24.85 docs/sec
-- **Sample Size:** 10 documents
+- **Duration:** 394.21ms
+- **Throughput:** 253.67 docs/sec
+- **Sample Size:** 100 documents
 
 ---
 
