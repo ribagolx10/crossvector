@@ -29,7 +29,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv pip install -e ".[dev,all]"
 
 # Or install specific extras
-uv pip install -e ".[dev,pgvector,openai]"  # Just PgVector + OpenAI
+uv pip install -e ".[dev,pgvector,gemini]"  # Just PgVector + Gemini
 ```
 
 3. **Setup pre-commit hooks:**
@@ -173,7 +173,7 @@ Results are saved as markdown reports for easy comparison. See [Benchmarking Gui
 import pytest
 from crossvector import VectorEngine
 from crossvector.dbs.pgvector import PgVectorAdapter
-from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
+from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
 
 class TestVectorEngine:
     @pytest.fixture
@@ -181,7 +181,7 @@ class TestVectorEngine:
         """Create test engine."""
         return VectorEngine(
             db=PgVectorAdapter(),
-            embedding=OpenAIEmbeddingAdapter(),
+            embedding=GeminiEmbeddingAdapter(),
             collection_name="test_collection"
         )
 

@@ -39,25 +39,33 @@ CrossVector provides a consistent, high-level API across multiple vector databas
 - [Contributing](contributing.md) - How to contribute to CrossVector
 - [Architecture](architecture.md) - System design and components
 
-## Simple Example
+## Quick Example
+
+> 💡 **Recommended**: Use Gemini for free tier and faster performance. [See why →](quickstart.md)
 
 ```python
 from crossvector import VectorEngine
-from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
+from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
 from crossvector.dbs.pgvector import PgVectorAdapter
 
-# Initialize
+# Initialize with Gemini (free tier, 1536-dim vectors)
 engine = VectorEngine(
-    embedding=OpenAIEmbeddingAdapter(),
     db=PgVectorAdapter(),
-    collection_name="documents"
+    embedding=GeminiEmbeddingAdapter(),
+    collection_name="my_docs"
 )
 
-# Create
-doc = engine.create(text="Python programming guide")
+# Create and search
+doc = engine.create("CrossVector makes vector databases easy")
+results = engine.search("vector database library", limit=5)
+```
 
-# Search
-results = engine.search("python tutorials", limit=5)
+**Why Gemini?**
+- ✅ Free API tier (1,500 RPM)
+- ✅ 1.5x faster search than OpenAI
+- ✅ 50% smaller vectors (768 vs 1536 dims)
+
+**With OpenAI?** [See alternative setup →](quickstart.md#using-openai-instead)
 
 # Query with filters
 from crossvector.querydsl.q import Q

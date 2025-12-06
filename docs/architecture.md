@@ -25,10 +25,10 @@ CrossVector is designed as a unified interface for multiple vector database back
          ▼                     ▼           ▼
 ┌──────────────────┐  ┌─────────────────────────┐
 │ EmbeddingAdapter │  │   VectorDBAdapter       │
-│  • OpenAI        │  │   • AstraDB             │
-│  • Gemini        │  │   • ChromaDB            │
-└──────────────────┘  │   • Milvus              │
-                      │   • PgVector            │
+│  • Gemini        │  │   • AstraDB             │
+│  • OpenAI        │  │   • ChromaDB            │
+│  • Custom...     │  │   • Milvus              │
+└──────────────────┘  │   • PgVector            │
                       └─────────────────────────┘
                                   │
                                   ▼
@@ -210,18 +210,15 @@ class EmbeddingAdapter(ABC):
 **Implementation Example:**
 
 ```python
-class OpenAIEmbeddingAdapter(EmbeddingAdapter):
-    def __init__(self, api_key, model_name="text-embedding-3-small"):
-        self.client = OpenAI(api_key=api_key)
+class GeminiEmbeddingAdapter(EmbeddingAdapter):
+    def __init__(self, api_key, model_name="models/text-embedding-004"):
+        self.api_key = api_key
         self.model_name = model_name
-        self._dimensions = 1536
+        self._dimensions = 768
 
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:
-        response = self.client.embeddings.create(
-            input=texts,
-            model=self.model_name
-        )
-        return [item.embedding for item in response.data]
+        # Implementation detail...
+        return vectors
 
     @property
     def dimensions(self) -> int:
@@ -397,7 +394,7 @@ VectorDBAdapter and EmbeddingAdapter use the Adapter pattern to provide a unifie
 # Unified interface
 engine = VectorEngine(
     db=PgVectorAdapter(),      # Can swap with AstraDBAdapter()
-    embedding=OpenAIEmbeddingAdapter()  # Can swap with GeminiEmbeddingAdapter()
+    embedding=GeminiEmbeddingAdapter()  # Can swap with OpenAIEmbeddingAdapter()
 )
 
 # Same API regardless of adapters
@@ -448,7 +445,7 @@ settings = CrossVectorSettings(
 ```
 1. Default values (in CrossVectorSettings)
    ↓
-2. Environment variables (OPENAI_API_KEY, VECTOR_COLLECTION_NAME, etc.)
+2. Environment variables (GEMINI_API_KEY, VECTOR_COLLECTION_NAME, etc.)
    ↓
 3. Programmatic config (passed to constructors)
 ```
@@ -462,9 +459,9 @@ class CrossVectorSettings(BaseSettings):
     PK_STRATEGY: str = "uuid"
     PK_FACTORY: Optional[Callable] = None
 
-    # OpenAI
-    OPENAI_API_KEY: str
-    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    # Gemini
+    GEMINI_API_KEY: str
+    VECTOR_EMBEDDING_MODEL: str = "models/text-embedding-004"
 
     # PgVector
     VECTOR_COLLECTION_NAME: str
@@ -757,7 +754,7 @@ def test_documents():
 ```python
 # ✅ Good: Environment variables
 import os
-api_key = os.getenv("OPENAI_API_KEY")
+api_key = os.getenv("GEMINI_API_KEY")
 
 # ❌ Bad: Hard-coded
 api_key = "sk-..."

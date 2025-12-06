@@ -8,18 +8,18 @@ CrossVector uses environment variables for configuration. Create a `.env` file i
 
 ```bash
 # .env file
-# OpenAI Configuration
+# OpenAI Embedding Provider
 OPENAI_API_KEY=sk-...
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 
-# Google Gemini Configuration
-GOOGLE_API_KEY=AI...
-GEMINI_EMBEDDING_MODEL=gemini-embedding-001
+# Gemini Embedding Provider
+GEMINI_API_KEY=AI...
 
-# AstraDB Configuration
+# Optional: Override default embedding model
+VECTOR_EMBEDDING_MODEL=text-embedding-3-small
+
+# AstraDB Backend
 ASTRA_DB_APPLICATION_TOKEN=AstraCS:...
-ASTRA_DB_API_ENDPOINT=https://...
-ASTRA_DB_COLLECTION_NAME=vectors
+ASTRA_DB_API_ENDPOINT=https://...apps.astra.datastax.com
 
 # ChromaDB Cloud Configuration
 CHROMA_API_KEY=...
@@ -77,6 +77,7 @@ Supported models (defaults to `text-embedding-3-small`):
 
 ```bash
 GEMINI_API_KEY=AI...               # Required: Your Gemini API key
+# Note: Use GEMINI_API_KEY (not GOOGLE_API_KEY)
 ```
 
 Supported models (defaults to `gemini-embedding-001`):
@@ -103,7 +104,7 @@ If not set, each adapter uses its own default:
 ```bash
 ASTRA_DB_APPLICATION_TOKEN=AstraCS:...  # Required: Application token
 ASTRA_DB_API_ENDPOINT=https://...       # Required: API endpoint
-ASTRA_DB_COLLECTION_NAME=vectors        # Optional: Default collection name
+# Note: Collection name uses VECTOR_COLLECTION_NAME (shared setting)
 ```
 
 Get your credentials from [Astra Portal](https://astra.datastax.com/).
