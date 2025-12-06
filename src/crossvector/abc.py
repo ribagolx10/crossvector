@@ -300,7 +300,7 @@ class VectorDBAdapter(ABC):
     def bulk_create(
         self,
         docs: List[VectorDocument],
-        batch_size: int = None,
+        batch_size: int = 100,
         ignore_conflicts: bool = False,
         update_conflicts: bool = False,
         update_fields: List[str] = None,
@@ -325,7 +325,7 @@ class VectorDBAdapter(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def delete(self, *ids) -> int:
+    def delete(self, *args) -> int:
         """Delete documents by primary key.
 
         Args:
@@ -363,7 +363,7 @@ class VectorDBAdapter(ABC):
     def bulk_update(
         self,
         docs: List[VectorDocument],
-        batch_size: int = None,
+        batch_size: int = 100,
         ignore_conflicts: bool = False,
         update_fields: List[str] = None,
     ) -> List[VectorDocument]:
@@ -385,7 +385,7 @@ class VectorDBAdapter(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def upsert(self, docs: List[VectorDocument], batch_size: int = None) -> List[VectorDocument]:
+    def upsert(self, docs: List[VectorDocument], batch_size: int = 100) -> List[VectorDocument]:
         """Insert new documents or update existing ones by pk in batch.
 
         Args:

@@ -15,6 +15,7 @@ Key Features:
 from typing import Any, Dict, List, Set
 
 from pymilvus import Collection, DataType, MilvusClient
+from pymilvus.exceptions import DescribeCollectionException
 
 from crossvector.abc import VectorDBAdapter
 from crossvector.constants import VECTOR_METRIC_MAP, VectorMetric
@@ -133,6 +134,9 @@ class MilvusAdapter(VectorDBAdapter):
             Collection info dict or None if doesn't exist
         """
         try:
+            # Avoid noisy RPC errors by checking existence first
+            if not self.client.has_collection(collection_name=collection_name):
+                return None
             return self.client.describe_collection(collection_name=collection_name)
         except Exception:
             return None
@@ -147,6 +151,8 @@ class MilvusAdapter(VectorDBAdapter):
             List of index info dicts or None if doesn't exist
         """
         try:
+            if not self.client.has_collection(collection_name=collection_name):
+                return None
             return self.client.describe_index(collection_name=collection_name)
         except Exception:
             return None
@@ -327,8 +333,11 @@ class MilvusAdapter(VectorDBAdapter):
         Returns:
             True if successful
         """
-        self.client.drop_collection(collection_name=collection_name)
-        self.logger.message(f"Milvus collection '{collection_name}' dropped.")
+        try:
+            self.client.drop_collection(collection_name=collection_name)
+            self.logger.message(f"Milvus collection '{collection_name}' dropped.")
+        except DescribeCollectionException:
+            self.logger.message(f"Milvus collection '{collection_name}' does not exist.")
         return True
 
     def clear_collection(self) -> int:
@@ -652,7 +661,7 @@ class MilvusAdapter(VectorDBAdapter):
     def bulk_create(
         self,
         docs: List[VectorDocument],
-        batch_size: int = None,
+        batch_size: int = 100,
         ignore_conflicts: bool = False,
         update_conflicts: bool = False,
         update_fields: List[str] = None,
@@ -680,6 +689,8 @@ class MilvusAdapter(VectorDBAdapter):
             )
         if not docs:
             return []
+
+        batch_size = min(1000, batch_size or 100)
 
         # Load collection before any operations
         self.client.load_collection(collection_name=self.collection_name)
@@ -733,7 +744,7 @@ class MilvusAdapter(VectorDBAdapter):
             created_docs.append(doc)
 
         if dataset:
-            if batch_size and batch_size > 0:
+            if batch_size > 0:
                 for i in range(0, len(dataset), batch_size):
                     self.client.upsert(collection_name=self.collection_name, data=dataset[i : i + batch_size])
             else:
@@ -745,7 +756,7 @@ class MilvusAdapter(VectorDBAdapter):
     def bulk_update(
         self,
         docs: List[VectorDocument],
-        batch_size: int = None,
+        batch_size: int = 100,
         ignore_conflicts: bool = False,
         update_fields: List[str] = None,
     ) -> List[VectorDocument]:
@@ -783,6 +794,8 @@ class MilvusAdapter(VectorDBAdapter):
 
         if not doc_map:
             return []
+
+        batch_size = min(1000, batch_size or 100)
 
         # Fetch all existing documents in ONE query
         pks = list(doc_map.keys())
@@ -846,12 +859,12 @@ class MilvusAdapter(VectorDBAdapter):
         self.logger.message(f"Bulk updated {len(updated_docs)} documents.")
         return updated_docs
 
-    def upsert(self, docs: List[VectorDocument], batch_size: int = None) -> List[VectorDocument]:
+    def upsert(self, docs: List[VectorDocument], batch_size: int = 100) -> List[VectorDocument]:
         """Insert or update multiple documents.
 
         Args:
             docs: List of VectorDocument instances to upsert
-            batch_size: Number of documents per batch (optional)
+            batch_size: Number of documents per batch (defaults to 100, capped at 1000 to avoid large gRPC payloads)
 
         Returns:
             List of upserted VectorDocument instances
@@ -864,6 +877,8 @@ class MilvusAdapter(VectorDBAdapter):
             raise CollectionNotInitializedError("Collection is not initialized", operation="upsert", adapter="Milvus")
         if not docs:
             return []
+
+        batch_size = min(1000, batch_size or 100)
 
         data = []
         for doc in docs:
@@ -885,7 +900,7 @@ class MilvusAdapter(VectorDBAdapter):
             doc_data["metadata"] = metadata
             data.append(doc_data)
 
-        if batch_size and batch_size > 0:
+        if batch_size > 0:
             for i in range(0, len(data), batch_size):
                 self.client.upsert(collection_name=self.collection_name, data=data[i : i + batch_size])
         else:

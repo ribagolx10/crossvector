@@ -737,7 +737,7 @@ class PgVectorAdapter(VectorDBAdapter):
     def bulk_create(
         self,
         docs: List[VectorDocument],
-        batch_size: int = None,
+        batch_size: int = 100,
         ignore_conflicts: bool = False,
         update_conflicts: bool = False,
         update_fields: List[str] = None,
@@ -765,6 +765,8 @@ class PgVectorAdapter(VectorDBAdapter):
             )
         if not docs:
             return []
+
+        batch_size = min(1000, batch_size or 100)
 
         created_docs: List[VectorDocument] = []
         batch: List[tuple] = []
@@ -819,7 +821,7 @@ class PgVectorAdapter(VectorDBAdapter):
     def bulk_update(
         self,
         docs: List[VectorDocument],
-        batch_size: int = None,
+        batch_size: int = 100,
         ignore_conflicts: bool = False,
         update_fields: List[str] = None,
     ) -> List[VectorDocument]:
@@ -858,6 +860,8 @@ class PgVectorAdapter(VectorDBAdapter):
         if not doc_map:
             return []
 
+        batch_size = min(1000, batch_size or 100)
+
         # Fetch all existing documents in ONE query
         pks = list(doc_map.keys())
         placeholders = ",".join(["%s"] * len(pks))
@@ -886,7 +890,7 @@ class PgVectorAdapter(VectorDBAdapter):
             return self.upsert(dataset, batch_size=batch_size)
         return []
 
-    def upsert(self, docs: List[VectorDocument], batch_size: int = None) -> List[VectorDocument]:
+    def upsert(self, docs: List[VectorDocument], batch_size: int = 100) -> List[VectorDocument]:
         """Insert or update multiple documents.
 
         Args:
@@ -904,6 +908,8 @@ class PgVectorAdapter(VectorDBAdapter):
             raise CollectionNotInitializedError("Collection is not initialized", operation="upsert", adapter="PGVector")
         if not docs:
             return []
+
+        batch_size = min(1000, batch_size or 100)
 
         batch: List[Tuple[Any, Any, Any, str]] = []
         upserted: List[VectorDocument] = []

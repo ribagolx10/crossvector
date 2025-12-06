@@ -354,7 +354,7 @@ class VectorEngine:
         metadata: Dict[str, Any] | None = None,
         defaults: Dict[str, Any] | None = None,
         score_threshold: float = 0.9,
-        priority: list[str] = ["pk", "vector", "metadata"],
+        priority: list[str] = ["pk", "metadata", "vector"],
         **kwargs,
     ) -> tuple[VectorDocument, bool]:
         """
@@ -412,16 +412,6 @@ class VectorEngine:
                 except Exception:
                     continue
 
-            elif step == "vector" and vector:
-                if not self.supports_vector_search:
-                    continue
-                candidates = self.search(query=vector, limit=1, fields={"text", "metadata"})
-                if candidates:
-                    candidate = candidates[0]
-                    score_val = candidate.metadata.get("score", 1.0) if isinstance(candidate.metadata, dict) else 1.0
-                    if isinstance(score_val, (int, float)) and score_val >= score_threshold:
-                        return candidate, False
-
             elif step == "metadata" and doc.metadata:
                 if not self.supports_metadata_only:
                     continue
@@ -443,6 +433,16 @@ class VectorEngine:
                             document_id=existing.id,
                         )
                     return existing, False
+
+            elif step == "vector" and vector:
+                if not self.supports_vector_search:
+                    continue
+                candidates = self.search(query=vector, limit=1, fields={"text", "metadata"})
+                if candidates:
+                    candidate = candidates[0]
+                    score_val = candidate.metadata.get("score", 1.0) if isinstance(candidate.metadata, dict) else 1.0
+                    if isinstance(score_val, (int, float)) and score_val >= score_threshold:
+                        return candidate, False
 
         # Create new doc
         if defaults:
@@ -536,6 +536,7 @@ class VectorEngine:
     def bulk_create(
         self,
         docs: List[Doc],
+        batch_size: int = 100,
         ignore_conflicts: bool = False,
         update_conflicts: bool = False,
     ) -> List[VectorDocument]:
@@ -546,6 +547,7 @@ class VectorEngine:
 
         Args:
             docs: List of documents (str | dict | VectorDocument)
+            batch_size: Optional batch size for chunked creates
             ignore_conflicts: If True, skip documents with conflicting IDs
             update_conflicts: If True, update existing documents on ID conflict
 
@@ -563,6 +565,7 @@ class VectorEngine:
         self.logger.message("Bulk create count=%d", len(prepared))
         return self.db.bulk_create(
             prepared,
+            batch_size=batch_size,
             ignore_conflicts=ignore_conflicts,
             update_conflicts=update_conflicts,
         )
@@ -570,7 +573,7 @@ class VectorEngine:
     def bulk_update(
         self,
         docs: List[Doc],
-        batch_size: int | None = None,
+        batch_size: int = 100,
         ignore_conflicts: bool = False,
     ) -> List[VectorDocument]:
         """Update multiple existing documents in batch.
@@ -603,7 +606,7 @@ class VectorEngine:
             ignore_conflicts=ignore_conflicts,
         )
 
-    def upsert(self, docs: list[Doc], batch_size: int | None = None) -> list[VectorDocument]:
+    def upsert(self, docs: list[Doc], batch_size: int = 100) -> list[VectorDocument]:
         """Insert or update multiple documents in batch (upsert operation).
 
         Creates new documents or updates existing ones based on ID presence.

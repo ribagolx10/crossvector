@@ -60,10 +60,12 @@ class MockDBAdapter(VectorDBAdapter):
     def bulk_create(
         self,
         documents: List[VectorDocument],
+        batch_size: int | None = 100,
         ignore_conflicts: bool = False,
         update_conflicts: bool = False,
     ) -> List[VectorDocument]:
         result = []
+        _ = batch_size  # batch handling is not simulated in this mock
         for doc in documents:
             if doc.pk in self.documents:
                 if ignore_conflicts:

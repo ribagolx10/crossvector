@@ -1,0 +1,5 @@
+# Ignore all fixture files
+*.json
+
+# Keep this directory
+!.gitignore

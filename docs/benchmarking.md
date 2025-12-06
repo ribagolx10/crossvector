@@ -201,12 +201,16 @@ Results are saved as a markdown file (default: `benchmark.md`) with:
 ```markdown
 ## Performance Summary
 
-| Backend  | Embedding | Model                   | Dim  | Bulk Create | Search (avg) | Update (avg) | Delete (batch) | Status |
-|----------|-----------|-------------------------|------|-------------|--------------|--------------|----------------|--------|
-| pgvector | openai    | text-embedding-3-small  | 1536 | 1.37s       | 434ms        | 6.20ms       | 0.54ms         | ✅     |
-| pgvector | gemini    | text-embedding-004      | 768  | 3.64s       | 321ms        | 3.16ms       | 0.47ms         | ✅     |
-| milvus   | openai    | text-embedding-3-small  | 1536 | 0.95s       | 156ms        | 4.12ms       | 0.31ms         | ✅     |
-| milvus   | gemini    | text-embedding-004      | 768  | 2.14s       | 189ms        | 3.89ms       | 0.28ms         | ✅     |
+| Backend | Embedding | Model | Dim | Upsert | Search (avg) | Update (avg) | Delete (batch) | Status |
+|---------|-----------|-------|-----|--------|--------------|--------------|----------------|--------|
+| pgvector | openai | text-embedding-3-small | 1536 | 7.06s | 21.26ms | 6.21ms | 22.63ms | ✅ |
+| astradb | openai | text-embedding-3-small | 1536 | 18.89s | 23.86s | 1.11s | 15.15s | ✅ |
+| milvus | openai | text-embedding-3-small | 1536 | 7.94s | 654.43ms | 569.52ms | 2.17s | ✅ |
+| chroma | openai | text-embedding-3-small | 1536 | 17.08s | 654.76ms | 1.23s | 4.73s | ✅ |
+| pgvector | gemini | models/gemini-embedding-001 | 1536 | 6.65s | 18.72ms | 6.40ms | 20.25ms | ✅ |
+| astradb | gemini | models/gemini-embedding-001 | 1536 | 11.25s | 6.71s | 903.37ms | 15.05s | ✅ |
+| milvus | gemini | models/gemini-embedding-001 | 1536 | 6.14s | 571.90ms | 561.38ms | 1.91s | ✅ |
+| chroma | gemini | models/gemini-embedding-001 | 1536 | 18.93s | 417.28ms | 1.24s | 4.63s | ✅ |
 ```
 
 ### Interpreting Metrics
@@ -245,6 +249,12 @@ Be aware of rate limits:
 - **Gemini**: 1,500 requests/min (free tier)
 
 For large benchmarks (--num-docs 1000+), the tool will automatically pace requests.
+
+#### Avoiding quota errors
+
+- If you see Gemini `RESOURCE_EXHAUSTED`, rerun with `--embedding-providers openai` or reduce `--num-docs`.
+- To avoid embedding API calls entirely, provide fixtures with vectors (e.g., `--use-fixtures scripts/benchmark/data/openai_3.json --add-vectors`) or let the tool generate static vectors when configured.
+- Keep long runs to a single backend to reduce concurrent calls (e.g., `--backends pgvector`).
 
 ## Comparing Before/After Changes
 

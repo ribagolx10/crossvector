@@ -34,6 +34,21 @@ Based on our comprehensive benchmarking, we recommend:
 
 See our [benchmarking guide](docs/benchmarking.md) for detailed performance comparisons.
 
+### Latest Benchmark (1000 docs, Dec 2025)
+
+| Backend | Embedding | Model | Dim | Upsert | Search (avg) | Update (avg) | Delete (batch) | Status |
+|---------|-----------|-------|-----|--------|--------------|--------------|----------------|--------|
+| pgvector | openai | text-embedding-3-small | 1536 | 7.06s | 21.26ms | 6.21ms | 22.63ms | ✅ |
+| astradb | openai | text-embedding-3-small | 1536 | 18.89s | 23.86s | 1.11s | 15.15s | ✅ |
+| milvus | openai | text-embedding-3-small | 1536 | 7.94s | 654.43ms | 569.52ms | 2.17s | ✅ |
+| chroma | openai | text-embedding-3-small | 1536 | 17.08s | 654.76ms | 1.23s | 4.73s | ✅ |
+| pgvector | gemini | models/gemini-embedding-001 | 1536 | 6.65s | 18.72ms | 6.40ms | 20.25ms | ✅ |
+| astradb | gemini | models/gemini-embedding-001 | 1536 | 11.25s | 6.71s | 903.37ms | 15.05s | ✅ |
+| milvus | gemini | models/gemini-embedding-001 | 1536 | 6.14s | 571.90ms | 561.38ms | 1.91s | ✅ |
+| chroma | gemini | models/gemini-embedding-001 | 1536 | 18.93s | 417.28ms | 1.24s | 4.63s | ✅ |
+
+Full results: [`benchmark.md`](benchmark.md).
+
 ---
 
 ## Features

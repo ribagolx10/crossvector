@@ -28,17 +28,23 @@ Usage:
 
 import argparse
 import copy
+import json
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from uuid import uuid4
 
 from dotenv import load_dotenv
 
 from crossvector import VectorEngine
 from crossvector.exceptions import MissingConfigError
 from crossvector.schema import VectorDocument
+
+# Import fixture generation functions
+from .generate_fixtures import (
+    generate_benchmark_docs,
+    generate_search_queries,
+)
 
 load_dotenv()
 
@@ -82,6 +88,102 @@ def generate_documents(num_docs: int) -> List[Dict[str, Any]]:
             }
         )
     return docs
+
+
+def generate_fixture_vectors(num_docs: int, dim: int = 1536) -> List[List[float]]:
+    """Generate static vectors for fixture documents.
+
+    Creates reproducible vectors with fixed seed for consistent benchmarking
+    without needing embedding API calls.
+
+    Args:
+        num_docs: Number of documents to generate vectors for
+        dim: Vector dimension (default 1536 for OpenAI embeddings)
+
+    Returns:
+        List of vectors, one per document
+    """
+    import random
+
+    vectors: List[List[float]] = []
+    random.seed(42)  # Fixed seed for reproducibility
+
+    for i in range(num_docs):
+        # Create normalized vector with values in [-1, 1] range
+        vector = [random.uniform(-1.0, 1.0) for _ in range(dim)]
+        vectors.append(vector)
+
+    return vectors
+
+
+def load_fixtures_from_file(
+    fixtures_path: str, num_docs: Optional[int] = None, add_vectors: bool = False
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Load test documents and queries from a fixtures JSON file.
+
+    Documents can either be:
+    - Simple format: {"text": "...", "metadata": {...}}
+    - With vectors: {"text": "...", "metadata": {...}, "vector": [...]}
+
+    Queries can be:
+    - String format: "query text"
+    - Object format: {"type": "...", "text": "query text"}
+
+    Args:
+        fixtures_path: Path to fixtures.json file
+        num_docs: Optional limit on number of documents to load (None = use all)
+        add_vectors: If True and documents lack vectors, generate and add them
+
+    Returns:
+        Tuple of (documents list, query strings list)
+
+    Raises:
+        FileNotFoundError: If fixtures file doesn't exist
+        json.JSONDecodeError: If fixtures file is invalid JSON
+    """
+    fixtures_file = Path(fixtures_path)
+    if not fixtures_file.exists():
+        raise FileNotFoundError(f"Fixtures file not found: {fixtures_path}")
+
+    with open(fixtures_file, "r") as f:
+        fixtures = json.load(f)
+
+    # Extract documents and queries
+    documents = fixtures.get("documents", [])
+    raw_queries = fixtures.get("queries", [])
+
+    # Limit number of documents if requested
+    if num_docs and num_docs > 0:
+        documents = documents[:num_docs]
+
+    # Extract query text (handle both string and object formats)
+    queries = []
+    for query in raw_queries:
+        if isinstance(query, str):
+            queries.append(query)
+        elif isinstance(query, dict):
+            # Extract 'text' field from query object
+            queries.append(query.get("text", str(query)))
+
+    # Log fixture info
+    has_vectors = any("vector" in doc for doc in documents)
+
+    # Generate and add vectors if requested and documents lack them
+    if add_vectors and not has_vectors:
+        print(f"📊 Generating vectors for {len(documents)} documents...")
+        generated_vectors = generate_fixture_vectors(len(documents))
+        for i, doc in enumerate(documents):
+            doc["vector"] = generated_vectors[i]
+        has_vectors = True
+        print("✅ Added vectors to all documents")
+    print(f"✅ Loaded {len(documents)} documents from {fixtures_path}")
+    if has_vectors:
+        print("   ✓ Documents include pre-computed vectors")
+    else:
+        print("   ℹ️  Documents will need vectors computed during benchmark")
+    print(f"✅ Loaded {len(queries)} search queries from {fixtures_path}")
+
+    return documents, queries
 
 
 def format_duration(seconds: float) -> str:
@@ -134,7 +236,7 @@ class BenchmarkRunner:
         self.num_docs = num_docs
         self.search_limit = search_limit
         # Always ensure collection_name is set (auto-generate with UUID if not provided)
-        self.collection_name = collection_name or f"benchmark_test_{uuid4().hex[:8]}"
+        self.collection_name = collection_name or f"benchmark_test_{str(time.time())[:8]}"
         self.results: Dict[str, Dict[str, Any]] = {}
 
         # Define available backends
@@ -385,15 +487,16 @@ class BenchmarkRunner:
                 print(f"\n✅ Using pre-generated {self.num_docs} documents (static vectors already attached)")
 
             # 1. Bulk Create Performance
-            print(f"\n1️⃣  Bulk Create ({self.num_docs} docs)...")
-            duration, created_docs = benchmark_operation("bulk_create", lambda: engine.bulk_create(test_docs))
-            results["bulk_create"] = {
+            print(f"\n1️⃣  Upsert ({self.num_docs} docs)...")
+            # Use conservative batch_size to satisfy provider limits (e.g., Chroma max batch 1000)
+            duration, upserted_docs = benchmark_operation("upsert", lambda: engine.upsert(test_docs, batch_size=100))
+            results["upsert"] = {
                 "duration": duration,
                 "docs_per_sec": self.num_docs / duration if duration > 0 else 0,
-                "success": created_docs is not None,
+                "success": upserted_docs is not None,
             }
             print(f"   ✅ Duration: {format_duration(duration)}")
-            print(f"   📊 {results['bulk_create']['docs_per_sec']:.2f} docs/sec")
+            print(f"   📊 {results['upsert']['docs_per_sec']:.2f} docs/sec")
 
             # 2. Individual Create Performance (small sample)
             sample_size = min(10, self.num_docs)
@@ -566,13 +669,13 @@ class BenchmarkRunner:
             else:
                 results["query_dsl_operators"] = {"supported": False}
 
-            # 5. Update Performance
-            print("\n5️⃣  Update Operations (100 updates)...")
-            update_sample = min(100, self.num_docs)
-            if created_docs and len(created_docs) >= update_sample:
+            # 5. Update Performance (use all docs)
+            print(f"\n5️⃣  Update Operations ({self.num_docs} updates)...")
+            update_sample = min(self.num_docs, len(upserted_docs) if upserted_docs else 0)
+            if upserted_docs and update_sample > 0:
                 update_times = []
                 for i in range(update_sample):
-                    doc = created_docs[i]
+                    doc = upserted_docs[i]
                     doc.metadata["updated"] = True
                     doc.metadata["update_idx"] = i
                     duration, _ = benchmark_operation(f"update_{i}", lambda d=doc: engine.update(d))
@@ -587,18 +690,24 @@ class BenchmarkRunner:
             else:
                 results["update"] = {"error": "No documents to update"}
 
-            # 6. Delete Performance
-            print("\n6️⃣  Delete Operations (100 deletes)...")
-            delete_sample = min(100, self.num_docs)
-            if created_docs and len(created_docs) >= delete_sample:
-                delete_ids = [doc.id for doc in created_docs[:delete_sample]]
-                duration, _ = benchmark_operation("batch_delete", lambda: engine.delete(*delete_ids))
+            # 6. Delete Performance (all docs, batched)
+            print(f"\n6️⃣  Delete Operations ({self.num_docs} deletes)...")
+            delete_sample = min(self.num_docs, len(upserted_docs) if upserted_docs else 0)
+            if upserted_docs and delete_sample > 0:
+                batch_size = 100
+                delete_ids = [doc.id for doc in upserted_docs[:delete_sample]]
+                total_duration = 0.0
+                for i in range(0, len(delete_ids), batch_size):
+                    batch_ids = delete_ids[i : i + batch_size]
+                    duration, _ = benchmark_operation("batch_delete", lambda ids=batch_ids: engine.delete(*ids))
+                    total_duration += duration
+
                 results["delete"] = {
-                    "duration": duration,
+                    "duration": total_duration,
                     "sample_size": delete_sample,
-                    "docs_per_sec": delete_sample / duration if duration > 0 else 0,
+                    "docs_per_sec": delete_sample / total_duration if total_duration > 0 else 0,
                 }
-                print(f"   ✅ Duration: {format_duration(duration)}")
+                print(f"   ✅ Duration: {format_duration(total_duration)}")
                 print(f"   📊 {results['delete']['docs_per_sec']:.2f} docs/sec")
             else:
                 results["delete"] = {"error": "No documents to delete"}
@@ -621,6 +730,32 @@ class BenchmarkRunner:
                     pass  # Silently ignore cleanup errors
 
         return results
+
+    def batch_search(
+        self, engine: VectorEngine, query_vectors: List[List[float]], search_limit: int = 5
+    ) -> Tuple[float, List[Dict[str, Any]]]:
+        """Perform batch vector searches without API calls.
+
+        Args:
+            engine: VectorEngine instance
+            query_vectors: List of pre-computed query vectors
+            search_limit: Number of results to return per query
+
+        Returns:
+            Tuple of (total_time, results)
+        """
+        start_time = time.time()
+        all_results = []
+
+        for vector in query_vectors:
+            try:
+                results = engine.search(query=vector, limit=search_limit)
+                all_results.extend(results)
+            except Exception as e:
+                print(f"    ⚠️  Query failed: {e}")
+
+        elapsed = time.time() - start_time
+        return elapsed, all_results
 
     def run_all(
         self, pre_docs: List[VectorDocument] = None, query_vectors: Dict[str, List[float]] = None
@@ -709,10 +844,10 @@ class BenchmarkRunner:
                 f.write("\n\n")
 
             f.write(
-                "| Backend | Embedding | Model | Dim | Bulk Create | Search (avg) | Update (avg) | Delete (batch) | Status |\n"
+                "| Backend | Embedding | Model | Dim | Upsert | Search (avg) | Update (avg) | Delete (batch) | Status |\n"
             )
             f.write(
-                "|---------|-----------|-------|-----|-------------|--------------|--------------|----------------|--------|\n"
+                "|---------|-----------|-------|-----|--------|--------------|--------------|----------------|--------|\n"
             )
 
             for result_key, result in self.results.items():
@@ -727,13 +862,31 @@ class BenchmarkRunner:
                 embedding = result.get("embedding", "unknown")
                 model = result.get("embedding_model", "unknown")
                 dim = result.get("embedding_dim", 0)
-                bulk_create = format_duration(result.get("bulk_create", {}).get("duration", 0))
+                upsert_entry = result.get("upsert", {})
+                update_entry = result.get("update", {})
+                delete_entry = result.get("delete", {})
+
+                bulk_create = format_duration(upsert_entry.get("duration", 0))
                 search = format_duration(result.get("vector_search", {}).get("avg_duration", 0))
-                update = format_duration(result.get("update", {}).get("avg_duration", 0))
-                delete = format_duration(result.get("delete", {}).get("duration", 0))
+                update = (
+                    "N/A"
+                    if isinstance(update_entry, dict) and "error" in update_entry
+                    else format_duration(update_entry.get("avg_duration", 0))
+                )
+                delete = (
+                    "N/A"
+                    if isinstance(delete_entry, dict) and "error" in delete_entry
+                    else format_duration(delete_entry.get("duration", 0))
+                )
+
+                status_icon = "✅"
+                if (isinstance(update_entry, dict) and "error" in update_entry) or (
+                    isinstance(delete_entry, dict) and "error" in delete_entry
+                ):
+                    status_icon = "⚠️"
 
                 f.write(
-                    f"| {backend} | {embedding} | {model} | {dim} | {bulk_create} | {search} | {update} | {delete} | ✅ |\n"
+                    f"| {backend} | {embedding} | {model} | {dim} | {bulk_create} | {search} | {update} | {delete} | {status_icon} |\n"
                 )
 
             f.write("\n---\n\n")
@@ -753,12 +906,15 @@ class BenchmarkRunner:
                 dim = result.get("embedding_dim", 0)
                 f.write(f"**Embedding:** {embedding} - {model} ({dim} dimensions)\n\n")
 
-                # Bulk Create
-                if "bulk_create" in result:
-                    bc = result["bulk_create"]
-                    f.write("### Bulk Create\n\n")
-                    f.write(f"- **Duration:** {format_duration(bc.get('duration', 0))}\n")
-                    f.write(f"- **Throughput:** {bc.get('docs_per_sec', 0):.2f} docs/sec\n\n")
+                # Upsert
+                if "upsert" in result:
+                    upsert = result["upsert"]
+                    f.write("### Upsert\n\n")
+                    f.write(f"- **Duration:** {format_duration(upsert.get('duration', 0))}\n")
+                    f.write(f"- **Throughput:** {upsert.get('docs_per_sec', 0):.2f} docs/sec\n")
+                    f.write(
+                        "- **Note:** Upsert creates new documents or updates existing ones (can be run repeatedly)\n\n"
+                    )
 
                 # Individual Create
                 if "individual_create" in result:
@@ -800,19 +956,27 @@ class BenchmarkRunner:
                         f.write("- **Status:** Not supported\n\n")
 
                 # Update
-                if "update" in result and "error" not in result["update"]:
-                    up = result["update"]
-                    f.write("### Update Operations\n\n")
-                    f.write(f"- **Average Duration:** {format_duration(up.get('avg_duration', 0))}\n")
-                    f.write(f"- **Sample Size:** {up.get('sample_size', 0)} documents\n\n")
+                if "update" in result:
+                    if isinstance(result["update"], dict) and "error" in result["update"]:
+                        f.write("### Update Operations\n\n")
+                        f.write(f"- **Status:** Not run ({result['update']['error']})\n\n")
+                    else:
+                        up = result["update"]
+                        f.write("### Update Operations\n\n")
+                        f.write(f"- **Average Duration:** {format_duration(up.get('avg_duration', 0))}\n")
+                        f.write(f"- **Sample Size:** {up.get('sample_size', 0)} documents\n\n")
 
                 # Delete
-                if "delete" in result and "error" not in result["delete"]:
-                    dl = result["delete"]
-                    f.write("### Delete Operations\n\n")
-                    f.write(f"- **Duration:** {format_duration(dl.get('duration', 0))}\n")
-                    f.write(f"- **Throughput:** {dl.get('docs_per_sec', 0):.2f} docs/sec\n")
-                    f.write(f"- **Sample Size:** {dl.get('sample_size', 0)} documents\n\n")
+                if "delete" in result:
+                    if isinstance(result["delete"], dict) and "error" in result["delete"]:
+                        f.write("### Delete Operations\n\n")
+                        f.write(f"- **Status:** Not run ({result['delete']['error']})\n\n")
+                    else:
+                        dl = result["delete"]
+                        f.write("### Delete Operations\n\n")
+                        f.write(f"- **Duration:** {format_duration(dl.get('duration', 0))}\n")
+                        f.write(f"- **Throughput:** {dl.get('docs_per_sec', 0):.2f} docs/sec\n")
+                        f.write(f"- **Sample Size:** {dl.get('sample_size', 0)} documents\n\n")
                 f.write("---\n\n")
 
             # Error Summary Section
@@ -826,10 +990,9 @@ class BenchmarkRunner:
                     f.write(f"### {backend.upper()} + {embedding.upper()}\n\n")
                     f.write(f"**Error:** {error_msg}\n\n")
 
-            # Footer
             f.write("## Notes\n\n")
             f.write("- Tests use specified embedding providers with their default models\n")
-            f.write("- Bulk operations create documents in batches\n")
+            f.write("- Upsert operations create new documents or update existing ones (can be run repeatedly)\n")
             f.write("- Search operations retrieve 100 results per query\n")
             f.write("- Times are averaged over multiple runs for stability\n")
             f.write("- Different embedding providers may have different dimensions and performance characteristics\n")
@@ -877,30 +1040,132 @@ def main():
         help="Timeout per backend test in seconds (default: 60). Cloud backends may need 120-300 seconds",
     )
     parser.add_argument("--output", type=str, default="benchmark.md", help="Output markdown file path")
+    parser.add_argument(
+        "--use-fixtures",
+        type=str,
+        default=None,
+        help="Path to pre-generated fixtures JSON file (replaces generated documents)",
+    )
+    parser.add_argument(
+        "--add-vectors",
+        action="store_true",
+        help="Generate and add vectors to fixture documents (skips embedding API calls)",
+    )
 
     args = parser.parse_args()
 
-    # Pre-generate test documents ONCE in main (no embedding API calls)
-    print(f"\n{'=' * 60}")
-    print("📝 Pre-generating test data...")
-    print(f"{'=' * 60}")
-    test_docs = generate_documents(args.num_docs)
-    print(f"✅ Generated {args.num_docs} documents with static vectors")
+    # Auto-generate fixtures for all embedding providers that will be used
+    # Determine which providers to generate fixtures for
+    providers_to_use = args.embedding_providers if args.embedding_providers else ["openai", "gemini"]
 
-    # Pre-define search queries (constant across all runs)
-    search_queries = [
-        "programming languages",
-        "machine learning",
-        "database optimization",
-        "cloud computing",
-        "web development",
-        "data science",
-        "cybersecurity",
-        "mobile apps",
-        "devops practices",
-        "software architecture",
-    ]
-    print(f"✅ Defined {len(search_queries)} search queries")
+    # Generate fixtures for each provider if they don't exist
+    if not args.use_fixtures:
+        for embedding_provider in providers_to_use:
+            fixture_path = Path(f"scripts/benchmark/data/{embedding_provider}_{args.num_docs}.json")
+
+            if not fixture_path.exists():
+                print(f"\n{'=' * 60}")
+                print(f"📝 Fixture not found: {fixture_path}")
+                print(f"🚀 Auto-generating fixtures with {embedding_provider.upper()} embeddings...")
+                print(f"{'=' * 60}\n")
+
+                # Generate fixtures directly using imported functions
+                try:
+                    # Generate documents and queries (same for all providers)
+                    num_queries = min(args.num_docs // 10, 100)
+                    print(f"📝 Generating {args.num_docs:,} documents with nested metadata...")
+                    docs = generate_benchmark_docs(args.num_docs, seed=42)
+                    print(f"✅ Generated {len(docs):,} documents\n")
+
+                    print(f"🔍 Generating {num_queries:,} diverse search queries...")
+                    queries = generate_search_queries(num_queries, seed=42)
+                    print(f"✅ Generated {len(queries):,} queries\n")
+
+                    # Generate vectors using embedding provider
+                    print(f"🤖 Generating vectors using {embedding_provider.upper()} embedding...")
+                    if embedding_provider == "openai":
+                        from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
+
+                        embedding_adapter = OpenAIEmbeddingAdapter(model_name="text-embedding-3-small")
+                    else:  # gemini
+                        from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
+
+                        embedding_adapter = GeminiEmbeddingAdapter(model_name="gemini-embedding-001", dim=1536)
+
+                    print(f"   Model: {embedding_adapter.model_name}")
+                    print(f"   Dimension: {embedding_adapter.dim}")
+
+                    # Generate vectors in batches
+                    batch_size = 500
+                    total_docs = len(docs)
+                    for i in range(0, total_docs, batch_size):
+                        batch = docs[i : i + batch_size]
+                        batch_texts = [doc["text"] for doc in batch]
+                        print(
+                            f"   Processing batch {i // batch_size + 1}/{(total_docs + batch_size - 1) // batch_size} ({len(batch)} docs)..."
+                        )
+                        vectors = embedding_adapter.get_embeddings(batch_texts)
+                        for doc, vector in zip(batch, vectors):
+                            doc["vector"] = vector
+
+                    print(f"✅ Generated {total_docs:,} vectors using {embedding_provider.upper()}\n")
+
+                    # Save to file
+                    fixture_path.parent.mkdir(parents=True, exist_ok=True)
+                    total_text_length = sum(len(doc["text"]) for doc in docs)
+                    fixtures = {
+                        "metadata": {
+                            "version": "1.0",
+                            "generated_at": datetime.now().isoformat(),
+                            "total_documents": len(docs),
+                            "total_queries": len(queries),
+                            "total_text_size_bytes": total_text_length,
+                            "average_text_length": round(total_text_length / len(docs), 1),
+                            "categories": list(set(doc["category"] for doc in docs)),
+                            "num_categories": len(set(doc["category"] for doc in docs)),
+                        },
+                        "documents": docs,
+                        "queries": queries,
+                    }
+
+                    with open(fixture_path, "w") as f:
+                        json.dump(fixtures, f, indent=2)
+
+                    file_size_mb = fixture_path.stat().st_size / 1024 / 1024
+                    print(f"✅ Fixtures saved: {fixture_path} ({file_size_mb:.1f} MB)\n")
+
+                except Exception as e:
+                    print(f"⚠️  Failed to generate fixtures for {embedding_provider}: {e}")
+                    print("   Will try to continue with other providers...\n")
+
+    # Load test documents from fixtures (if using --use-fixtures)
+    # Otherwise, fixtures were already generated above for each provider
+    test_docs = None
+    search_queries = None
+
+    print(f"\n{'=' * 60}")
+    if args.use_fixtures:
+        fixture_path = Path(args.use_fixtures)
+        if fixture_path.exists():
+            print(f"📂 Loading fixtures from {fixture_path}...")
+            try:
+                test_docs, search_queries = load_fixtures_from_file(
+                    str(fixture_path), args.num_docs, add_vectors=args.add_vectors
+                )
+                print(f"{'=' * 60}")
+            except (FileNotFoundError, json.JSONDecodeError) as e:
+                print(f"❌ Failed to load fixtures: {e}")
+                print(f"{'=' * 60}")
+                return
+        else:
+            print(f"❌ Fixtures file not found: {fixture_path}")
+            print(f"{'=' * 60}")
+            return
+    else:
+        # Fixtures already generated per provider above
+        # We'll load them per-provider in the benchmark loop
+        print("📝 Fixtures generated for each embedding provider")
+        print(f"{'=' * 60}")
 
     # Create BenchmarkRunner instance
     # Constructor will auto-generate random collection_name if not provided
@@ -913,18 +1178,76 @@ def main():
         collection_name=args.collection_name,
     )
 
+    # Load fixtures per embedding provider (if not using --use-fixtures)
+    fixtures_by_provider = {}
+    if not args.use_fixtures:
+        for emb_name in runner.embedding_providers.keys():
+            fixture_path = Path(f"scripts/benchmark/data/{emb_name}_{args.num_docs}.json")
+            if fixture_path.exists():
+                try:
+                    docs, queries = load_fixtures_from_file(str(fixture_path), args.num_docs, add_vectors=False)
+                    fixtures_by_provider[emb_name] = {"docs": docs, "queries": queries}
+                except Exception as e:
+                    print(f"⚠️  Failed to load fixtures for {emb_name}: {e}")
+    else:
+        # Use the same fixtures for all providers (from --use-fixtures)
+        for emb_name in runner.embedding_providers.keys():
+            fixtures_by_provider[emb_name] = {"docs": test_docs, "queries": search_queries}
+
     # Pre-compute query vectors for each embedding provider
     query_vectors_by_embedding = {}
     for emb_name in runner.embedding_providers.keys():
         embedding_init = runner.embedding_providers[emb_name]
         embedding = embedding_init()
-        if embedding:
+        if embedding and emb_name in fixtures_by_provider:
             dim = getattr(embedding, "dim", 1536)
-            query_vectors_by_embedding[emb_name] = runner._precompute_query_vectors(search_queries, dim)
+            queries_list = fixtures_by_provider[emb_name]["queries"]
+            query_vectors_by_embedding[emb_name] = runner._precompute_query_vectors(queries_list, dim)
             print(f"✅ Pre-computed query vectors for {emb_name} (dim={dim})")
 
-    # Run benchmarks with pre-computed data (NO additional generation in loop)
-    runner.run_all(pre_docs=test_docs, query_vectors=query_vectors_by_embedding)
+    # Run benchmarks with fixtures per provider
+    # Modified run_all to handle per-provider fixtures
+    print(f"\n{'=' * 60}")
+    print("🚀 CrossVector Benchmark Suite")
+    print(f"{'=' * 60}")
+    print(f"📊 Documents per test: {args.num_docs}")
+    print(f"🎯 Backends: {', '.join(runner.backends.keys())}")
+    print(f"🤖 Embeddings: {', '.join(runner.embedding_providers.keys())}")
+    print(f"⏰ Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    for emb_name, emb_init_func in runner.embedding_providers.items():
+        embedding = emb_init_func()
+        if not embedding:
+            continue
+
+        # Get fixtures for this specific provider
+        if emb_name in fixtures_by_provider:
+            provider_docs = fixtures_by_provider[emb_name]["docs"]
+            # Attach vectors to documents
+            docs_with_vectors = copy.deepcopy(provider_docs)
+            runner._precompute_doc_embeddings(docs_with_vectors, embedding)
+        else:
+            docs_with_vectors = None
+
+        # Get pre-computed query vectors for this embedding
+        emb_query_vectors = query_vectors_by_embedding.get(emb_name)
+
+        for backend_name, init_func in runner.backends.items():
+            result_key = f"{backend_name}_{emb_name}"
+            try:
+                runner.results[result_key] = runner.benchmark_backend(
+                    backend_name,
+                    init_func,
+                    emb_name,
+                    embedding,
+                    pre_docs=docs_with_vectors,
+                    query_vectors=emb_query_vectors,
+                )
+            except Exception as e:
+                # Skip failed backends gracefully instead of crashing
+                error_msg = str(e)[:100]
+                print(f"\n⚠️  Skipping {backend_name}_{emb_name}: {error_msg}...")
+                runner.results[result_key] = {"error": error_msg}
 
     # Generate report
     runner.generate_markdown_report(output_file=args.output)

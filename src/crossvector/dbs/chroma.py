@@ -663,7 +663,7 @@ class ChromaAdapter(VectorDBAdapter):
     def bulk_create(
         self,
         docs: List[VectorDocument],
-        batch_size: int = None,
+        batch_size: int = 100,
         ignore_conflicts: bool = False,
         update_conflicts: bool = False,
         update_fields: List[str] = None,
@@ -751,25 +751,20 @@ class ChromaAdapter(VectorDBAdapter):
         if not to_add_ids:
             return []
 
-        # ChromaDB batch insert with optional chunking
-        if batch_size and batch_size > 0:
-            for i in range(0, len(to_add_ids), batch_size):
-                slice_ids = to_add_ids[i : i + batch_size]
-                slice_vecs = to_add_vectors[i : i + batch_size]
-                slice_meta = to_add_metadatas[i : i + batch_size]
-                slice_docs = [t for t in to_add_texts[i : i + batch_size]] if self.store_text else None
-                self.collection.add(
-                    ids=slice_ids,
-                    embeddings=slice_vecs,
-                    metadatas=slice_meta,
-                    documents=slice_docs,
-                )
-        else:
+        # Normalize batch_size (default 100, cap 1000)
+        batch_size = min(1000, batch_size or 100)
+
+        # ChromaDB batch insert with chunking
+        for i in range(0, len(to_add_ids), batch_size):
+            slice_ids = to_add_ids[i : i + batch_size]
+            slice_vecs = to_add_vectors[i : i + batch_size]
+            slice_meta = to_add_metadatas[i : i + batch_size]
+            slice_docs = [t for t in to_add_texts[i : i + batch_size]] if self.store_text else None
             self.collection.add(
-                ids=to_add_ids,
-                embeddings=to_add_vectors,
-                metadatas=to_add_metadatas,
-                documents=to_add_texts if self.store_text else None,
+                ids=slice_ids,
+                embeddings=slice_vecs,
+                metadatas=slice_meta,
+                documents=slice_docs,
             )
 
         self.logger.message(f"Bulk created {len(created_docs)} documents.")
@@ -778,7 +773,7 @@ class ChromaAdapter(VectorDBAdapter):
     def bulk_update(
         self,
         docs: List[VectorDocument],
-        batch_size: int = None,
+        batch_size: int = 100,
         ignore_conflicts: bool = False,
         update_fields: List[str] = None,
     ) -> List[VectorDocument]:
@@ -902,31 +897,25 @@ class ChromaAdapter(VectorDBAdapter):
             self.logger.message("Bulk updated 0 documents.")
             return []
 
-        # Perform batched updates to reduce round-trips
-        if batch_size and batch_size > 0:
-            for i in range(0, len(update_ids), batch_size):
-                slice_ids = update_ids[i : i + batch_size]
-                slice_vectors = update_vectors[i : i + batch_size]
-                slice_meta = update_metadatas[i : i + batch_size]
-                slice_docs = update_texts[i : i + batch_size] if self.store_text else None
-                self.collection.update(
-                    ids=slice_ids,
-                    embeddings=slice_vectors,
-                    metadatas=slice_meta,
-                    documents=slice_docs,
-                )
-        else:
+        # Perform batched updates to reduce round-trips (default 100, cap 1000)
+        batch_size = min(1000, batch_size or 100)
+
+        for i in range(0, len(update_ids), batch_size):
+            slice_ids = update_ids[i : i + batch_size]
+            slice_vectors = update_vectors[i : i + batch_size]
+            slice_meta = update_metadatas[i : i + batch_size]
+            slice_docs = update_texts[i : i + batch_size] if self.store_text else None
             self.collection.update(
-                ids=update_ids,
-                embeddings=update_vectors,
-                metadatas=update_metadatas,
-                documents=update_texts if self.store_text else None,
+                ids=slice_ids,
+                embeddings=slice_vectors,
+                metadatas=slice_meta,
+                documents=slice_docs,
             )
 
         self.logger.message(f"Bulk updated {len(updated_docs)} documents. (single fetch, batched writes)")
         return updated_docs
 
-    def upsert(self, docs: List[VectorDocument], batch_size: int = None) -> List[VectorDocument]:
+    def upsert(self, docs: List[VectorDocument], batch_size: int = 100) -> List[VectorDocument]:
         """Insert or update multiple documents.
 
         Args:
@@ -963,25 +952,20 @@ class ChromaAdapter(VectorDBAdapter):
             metadatas.append(metadata)
             texts.append(doc.text if (self.store_text and doc.text is not None) else None)
 
+        # Default batch_size to 100; cap to Chroma max 1000
+        batch_size = min(1000, batch_size or 100)
+
         # Use Chroma's native upsert API to insert or update
-        if batch_size and batch_size > 0:
-            for i in range(0, len(ids), batch_size):
-                slice_ids = ids[i : i + batch_size]
-                slice_vecs = vectors[i : i + batch_size]
-                slice_meta = metadatas[i : i + batch_size]
-                slice_docs = texts[i : i + batch_size] if self.store_text else None
-                self.collection.upsert(
-                    ids=slice_ids,
-                    embeddings=slice_vecs,
-                    metadatas=slice_meta,
-                    documents=slice_docs,
-                )
-        else:
+        for i in range(0, len(ids), batch_size):
+            slice_ids = ids[i : i + batch_size]
+            slice_vecs = vectors[i : i + batch_size]
+            slice_meta = metadatas[i : i + batch_size]
+            slice_docs = texts[i : i + batch_size] if self.store_text else None
             self.collection.upsert(
-                ids=ids,
-                embeddings=vectors,
-                metadatas=metadatas,
-                documents=texts if self.store_text else None,
+                ids=slice_ids,
+                embeddings=slice_vecs,
+                metadatas=slice_meta,
+                documents=slice_docs,
             )
 
         self.logger.message(f"Upserted {len(docs)} documents.")

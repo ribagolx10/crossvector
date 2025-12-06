@@ -393,7 +393,13 @@ class AstraDBAdapter(VectorDBAdapter):
             # - If performing vector search, include '$vector' to allow VectorDocument creation.
             # - If metadata-only search, we can exclude vector for efficiency and inject empty list.
             projection = None
-            if fields and vector is not None:
+            if vector is not None:
+                # Always include vector for similarity computation; add requested fields if any
+                projection = {"$vector": 1}
+                if fields:
+                    for field in fields:
+                        projection[field] = 1
+            elif fields:
                 projection = {field: 1 for field in fields}
 
             # AstraDB doesn't have native skip, so we fetch limit+offset and slice
@@ -818,10 +824,18 @@ class AstraDBAdapter(VectorDBAdapter):
         if not docs:
             return []
 
-        # Collect all IDs for single fetch (avoid N+1 lookups)
+        # Default batch_size to 100 to satisfy Astra $in limit (<=100) and API batch limits
+        if batch_size is None or batch_size <= 0:
+            batch_size = 100
+
+        # Collect existing docs in batches (Astra $in max 100)
+        existing_map: Dict[str, Any] = {}
         ids = [doc.pk for doc in docs if doc.pk]
-        existing_docs = list(self.collection.find({"_id": {"$in": ids}})) if ids else []
-        existing_map = {d["_id"]: d for d in existing_docs}
+        if ids:
+            for chunk in chunk_iter(ids, batch_size):
+                found = list(self.collection.find({"_id": {"$in": list(chunk)}}))
+                for d in found:
+                    existing_map[d.get("_id")] = d
 
         to_insert: List[Dict[str, Any]] = []
         updated: List[VectorDocument] = []
@@ -846,11 +860,8 @@ class AstraDBAdapter(VectorDBAdapter):
 
         # Batch insert new documents
         if to_insert:
-            if batch_size and batch_size > 0:
-                for chunk in chunk_iter(to_insert, batch_size):
-                    self.collection.insert_many(list(chunk))
-            else:
-                self.collection.insert_many(to_insert)
+            for chunk in chunk_iter(to_insert, batch_size):
+                self.collection.insert_many(list(chunk))
 
         total = len(updated) + len(inserted)
         self.logger.message(f"Upserted {total} documents (created={len(inserted)}, updated={len(updated)}).")
