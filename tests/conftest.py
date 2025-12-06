@@ -286,7 +286,7 @@ def pgvector_credentials():
     return {
         "host": host,
         "port": os.getenv("PGVECTOR_PORT", "5432"),
-        "dbname": os.getenv("PGVECTOR_DBNAME", "postgres"),
+        "dbname": os.getenv("VECTOR_COLLECTION_NAME", "postgres"),
         "user": os.getenv("PGVECTOR_USER", "postgres"),
         "password": os.getenv("PGVECTOR_PASSWORD", "postgres"),
     }

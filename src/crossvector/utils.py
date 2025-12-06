@@ -201,9 +201,9 @@ def prepare_item_for_storage(doc: Dict[str, Any] | Any, *, store_text: bool = Tr
         return item
     # Dict-like path
     item: Dict[str, Any] = {}
-    _id = doc.get("_id") or doc.get("id")  # type: ignore[attr-defined]
-    if _id:
-        item["_id"] = _id
+    pk = doc.get("_id") or doc.get("id")  # type: ignore[attr-defined]
+    if pk:
+        item["_id"] = pk
     vector = doc.get("$vector") or doc.get("vector")  # type: ignore[attr-defined]
     if vector is not None:
         item["$vector"] = vector

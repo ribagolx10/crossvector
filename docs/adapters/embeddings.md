@@ -37,8 +37,8 @@ pip install crossvector[openai]
 
 ```bash
 OPENAI_API_KEY="sk-..."
-OPENAI_EMBEDDING_MODEL="text-embedding-3-small"  # Optional
-OPENAI_EMBEDDING_DIMENSIONS="1536"  # Optional
+# Optional: Override default model
+VECTOR_EMBEDDING_MODEL="text-embedding-3-small"
 ```
 
 **Programmatic:**
@@ -46,11 +46,11 @@ OPENAI_EMBEDDING_DIMENSIONS="1536"  # Optional
 ```python
 from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
 
-embedding = OpenAIEmbeddingAdapter(
-    api_key="sk-...",
-    model_name="text-embedding-3-small",
-    dimensions=1536
-)
+# Uses default model (text-embedding-3-small)
+embedding = OpenAIEmbeddingAdapter()
+
+# Or specify model explicitly
+embedding = OpenAIEmbeddingAdapter(model_name="text-embedding-3-large")
 ```
 
 ### Available Models
@@ -246,8 +246,9 @@ pip install crossvector[gemini]
 **Environment Variables:**
 
 ```bash
-GEMINI_API_KEY="your-api-key"
-GEMINI_EMBEDDING_MODEL="text-embedding-004"  # Optional
+GEMINI_API_KEY="your-key"
+# Optional: Override default model
+VECTOR_EMBEDDING_MODEL="gemini-embedding-001"
 ```
 
 **Programmatic:**
@@ -255,41 +256,55 @@ GEMINI_EMBEDDING_MODEL="text-embedding-004"  # Optional
 ```python
 from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
 
-embedding = GeminiEmbeddingAdapter(
-    api_key="your-api-key",
-    model_name="text-embedding-004"
-)
+# Uses default model (gemini-embedding-001)
+embedding = GeminiEmbeddingAdapter()
+
+# Or specify model explicitly
+embedding = GeminiEmbeddingAdapter(model_name="text-embedding-005")
 ```
 
 ### Available Models
 
-#### text-embedding-004 (Latest)
+#### gemini-embedding-001 (Recommended)
 
-Current generation model with task-specific optimization.
+State-of-the-art model with flexible dimensions and multilingual support.
 
 ```python
 embedding = GeminiEmbeddingAdapter(
-    model_name="text-embedding-004",
-    task_type="RETRIEVAL_DOCUMENT"
+    model_name="gemini-embedding-001",
+    dim=1536,  # 768, 1536, or 3072
+    task_type="retrieval_document"
 )
 ```
 
 **Specifications:**
 
-- **Dimensions:** 768
+- **Dimensions:** 768, 1536 (default), or 3072
 - **Max tokens:** 2,048
-- **Task types:** RETRIEVAL_DOCUMENT, RETRIEVAL_QUERY, SEMANTIC_SIMILARITY, etc.
-- **Cost:** Lower than OpenAI
+- **Task types:** retrieval_document, retrieval_query, semantic_similarity, classification
+- **Best performance:** Across English, multilingual, and code tasks
 
-#### embedding-001 (Legacy)
+#### text-embedding-005
 
-Previous generation model.
+Specialized for English and code tasks.
 
 ```python
-embedding = GeminiEmbeddingAdapter(model_name="embedding-001")
+embedding = GeminiEmbeddingAdapter(model_name="text-embedding-005")
 ```
 
-**Status:** Use text-embedding-004 instead
+**Specifications:**
+
+- **Dimensions:** 768 (fixed)
+- **Max tokens:** 2,048
+- **Best for:** English-only content
+
+#### text-embedding-004 (Legacy)
+
+```python
+embedding = GeminiEmbeddingAdapter(model_name="text-embedding-004")
+```
+
+**Status:** Use gemini-embedding-001 or text-embedding-005 instead
 
 ### Task Types
 
@@ -297,7 +312,7 @@ Optimize embeddings for specific use cases:
 
 ```python
 # For documents being stored
-embedding = GeminiEmbeddingAdapter(task_type="RETRIEVAL_DOCUMENT")
+embedding = GeminiEmbeddingAdapter(task_type="retrieval_document")
 
 # For search queries
 embedding = GeminiEmbeddingAdapter(task_type="RETRIEVAL_QUERY")

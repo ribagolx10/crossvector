@@ -23,8 +23,8 @@ def pgvector_engine():
         embedding = OpenAIEmbeddingAdapter(model_name="text-embedding-3-small")
         db = PgVectorAdapter()
         engine = VectorEngine(
-            embedding=embedding,
             db=db,
+            embedding=embedding,
             collection_name="test_crossvector",
             store_text=True,
         )
@@ -37,8 +37,8 @@ def pgvector_engine():
 
         # Reinitialize
         engine = VectorEngine(
-            embedding=embedding,
             db=db,
+            embedding=embedding,
             collection_name="test_crossvector",
             store_text=True,
         )

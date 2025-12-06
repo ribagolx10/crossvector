@@ -14,7 +14,7 @@ Key Features:
 
 from typing import Any, Dict, List, Set
 
-from pymilvus import DataType, MilvusClient
+from pymilvus import Collection, DataType, MilvusClient
 
 from crossvector.abc import VectorDBAdapter
 from crossvector.constants import VECTOR_METRIC_MAP, VectorMetric
@@ -30,7 +30,6 @@ from crossvector.exceptions import (
     MissingDocumentError,
     MissingFieldError,
     MultipleObjectsReturned,
-    SearchError,
 )
 from crossvector.querydsl.compilers.milvus import MilvusWhereCompiler, milvus_where
 from crossvector.schema import VectorDocument
@@ -52,25 +51,14 @@ class MilvusAdapter(VectorDBAdapter):
 
     Attributes:
         collection_name: Name of the active collection
-        embedding_dimension: Dimension of vector embeddings
+        dim: Dimension of vector embeddings
         store_text: Whether to store original text with vectors
     """
 
     use_dollar_vector: bool = False
     where_compiler: MilvusWhereCompiler = milvus_where
-    # Capability flags: Milvus requires vector for similarity search; metadata-only search disabled
-    supports_metadata_only: bool = False
-
-    def __init__(self, **kwargs: Any):
-        """Initialize the Milvus adapter with lazy client setup.
-
-        Args:
-            **kwargs: Additional configuration options (currently unused)
-        """
-        super(MilvusAdapter, self).__init__(**kwargs)
-        self._client: MilvusClient | None = None
-        self.collection_name: str | None = None
-        self.embedding_dimension: int | None = None
+    # Capability flags: Milvus supports metadata-only search via query()
+    supports_metadata_only: bool = True
 
     @property
     def client(self) -> MilvusClient:
@@ -97,6 +85,15 @@ class MilvusAdapter(VectorDBAdapter):
             self.logger.message(f"MilvusClient initialized with uri={uri}")
         return self._client
 
+    @property
+    def collection(self) -> Collection | None:
+        """Return the active Milvus collection instance.
+
+        Returns:
+            Collection instance or None if not initialized
+        """
+        return self._collection
+
     # ------------------------------------------------------------------
     # Collection Management
     # ------------------------------------------------------------------
@@ -104,7 +101,7 @@ class MilvusAdapter(VectorDBAdapter):
     def initialize(
         self,
         collection_name: str,
-        embedding_dimension: int,
+        dim: int,
         metric: str | None = None,
         store_text: bool | None = None,
         **kwargs: Any,
@@ -113,7 +110,7 @@ class MilvusAdapter(VectorDBAdapter):
 
         Args:
             collection_name: Name of the collection to use/create
-            embedding_dimension: Dimension of the vector embeddings
+            dim: Dimension of the vector embeddings
             metric: Distance metric ('cosine', 'euclidean', 'dot_product')
             store_text: Whether to store original text content
             **kwargs: Additional configuration options
@@ -121,10 +118,10 @@ class MilvusAdapter(VectorDBAdapter):
         self.store_text = store_text if store_text is not None else api_settings.VECTOR_STORE_TEXT
         if metric is None:
             metric = api_settings.VECTOR_METRIC or VectorMetric.COSINE
-        self.get_or_create_collection(collection_name, embedding_dimension, metric)
+        self.get_or_create_collection(collection_name, dim, metric)
         self.logger.message(
             f"Milvus initialized: collection='{collection_name}', "
-            f"dimension={embedding_dimension}, metric={metric}, store_text={self.store_text}"
+            f"dimension={dim}, metric={metric}, store_text={self.store_text}"
         )
 
     def _get_collection_info(self, collection_name: str) -> Dict[str, Any] | None:
@@ -155,11 +152,11 @@ class MilvusAdapter(VectorDBAdapter):
         except Exception:
             return None
 
-    def _build_schema(self, embedding_dimension: int) -> Any:
+    def _build_schema(self, dim: int) -> Any:
         """Build Milvus schema with dynamic PK type based on PRIMARY_KEY_MODE.
 
         Args:
-            embedding_dimension: Dimension of vector embeddings
+            dim: Dimension of vector embeddings
 
         Returns:
             Milvus schema object
@@ -172,7 +169,7 @@ class MilvusAdapter(VectorDBAdapter):
         else:
             schema.add_field(field_name="id", datatype=DataType.VARCHAR, max_length=255, is_primary=True)
 
-        schema.add_field(field_name="vector", datatype=DataType.FLOAT_VECTOR, dim=embedding_dimension)
+        schema.add_field(field_name="vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
 
         if self.store_text:
             # Max length for VARCHAR in Milvus is 65535
@@ -181,11 +178,11 @@ class MilvusAdapter(VectorDBAdapter):
         schema.add_field(field_name="metadata", datatype=DataType.JSON)
         return schema
 
-    def _build_index_params(self, embedding_dimension: int, metric: str = VectorMetric.COSINE) -> Any:
+    def _build_index_params(self, dim: int, metric: str = VectorMetric.COSINE) -> Any:
         """Build Milvus index parameters.
 
         Args:
-            embedding_dimension: Dimension of vector embeddings
+            dim: Dimension of vector embeddings
             metric: Distance metric for vector search
 
         Returns:
@@ -203,12 +200,12 @@ class MilvusAdapter(VectorDBAdapter):
         )
         return index_params
 
-    def add_collection(self, collection_name: str, embedding_dimension: int, metric: str = VectorMetric.COSINE) -> None:
+    def add_collection(self, collection_name: str, dim: int, metric: str = VectorMetric.COSINE) -> None:
         """Create a new Milvus collection.
 
         Args:
             collection_name: Name of the collection to create
-            embedding_dimension: Vector embedding dimension
+            dim: Vector embedding dimension
             metric: Distance metric for vector search
 
         Raises:
@@ -219,14 +216,14 @@ class MilvusAdapter(VectorDBAdapter):
             raise CollectionExistsError("Collection already exists", collection_name=collection_name)
 
         self.collection_name = collection_name
-        self.embedding_dimension = embedding_dimension
+        self.dim = dim
         if not hasattr(self, "store_text"):
             self.store_text = True
 
         metric_key = VECTOR_METRIC_MAP.get(metric, VectorMetric.COSINE)
-        schema = self._build_schema(embedding_dimension)
+        schema = self._build_schema(dim)
         self.client.create_collection(collection_name=collection_name, schema=schema)
-        index_params = self._build_index_params(embedding_dimension, metric_key)
+        index_params = self._build_index_params(dim, metric_key)
         self.client.create_index(collection_name=collection_name, index_params=index_params)
         self.logger.message(f"Milvus collection '{collection_name}' created with schema and index.")
 
@@ -246,9 +243,7 @@ class MilvusAdapter(VectorDBAdapter):
         self.collection_name = collection_name
         self.logger.message(f"Milvus collection '{collection_name}' retrieved.")
 
-    def get_or_create_collection(
-        self, collection_name: str, embedding_dimension: int, metric: str = VectorMetric.COSINE
-    ) -> None:
+    def get_or_create_collection(self, collection_name: str, dim: int, metric: str = VectorMetric.COSINE) -> None:
         """Get or create the underlying Milvus collection.
 
         Ensures the collection exists with proper vector configuration.
@@ -257,14 +252,14 @@ class MilvusAdapter(VectorDBAdapter):
 
         Args:
             collection_name: Name of the collection
-            embedding_dimension: Vector embedding dimension
+            dim: Vector embedding dimension
             metric: Distance metric for vector search
 
         Raises:
             Exception: If collection initialization fails
         """
         self.collection_name = collection_name
-        self.embedding_dimension = embedding_dimension
+        self.dim = dim
         if not hasattr(self, "store_text"):
             self.store_text = True
 
@@ -318,9 +313,9 @@ class MilvusAdapter(VectorDBAdapter):
             need_create = True
 
         if need_create:
-            schema = self._build_schema(embedding_dimension)
+            schema = self._build_schema(dim)
             self.client.create_collection(collection_name=collection_name, schema=schema)
-            index_params = self._build_index_params(embedding_dimension, metric_key)
+            index_params = self._build_index_params(dim, metric_key)
             self.client.create_index(collection_name=collection_name, index_params=index_params)
             self.logger.message(f"Milvus collection '{collection_name}' created with schema and index.")
 
@@ -391,21 +386,24 @@ class MilvusAdapter(VectorDBAdapter):
         where: Dict[str, Any] | None = None,
         fields: Set[str] | None = None,
     ) -> List[VectorDocument]:
-        """Perform vector similarity search.
+        """Perform vector similarity search or metadata-only query.
 
         Args:
-            vector: Query vector embedding
+            vector: Query vector embedding (optional for metadata-only search)
             limit: Maximum number of results to return
             offset: Number of results to skip (for pagination)
             where: Optional metadata filter conditions
             fields: Optional set of field names to include in results
 
         Returns:
-            List of VectorDocument instances ordered by similarity
+            List of VectorDocument instances (ordered by similarity if vector provided)
 
         Raises:
             CollectionNotInitializedError: If collection is not initialized
-            SearchError: If neither vector nor where filter provided
+
+        Note:
+            - With vector: Uses similarity search with optional metadata filtering
+            - Without vector: Uses metadata-only query (requires where filter)
         """
         if not self.collection_name:
             raise CollectionNotInitializedError("Collection is not initialized", operation="search", adapter="Milvus")
@@ -429,23 +427,27 @@ class MilvusAdapter(VectorDBAdapter):
         fetch_limit = limit + offset
 
         if vector is None:
-            # Milvus adapter does not support pure metadata-only search via engine abstraction.
-            raise SearchError(
-                "Vector is required for Milvus search (metadata-only disabled)",
-                reason="vector_missing",
+            # Metadata-only query returns a flat list
+            results = self.client.query(
+                collection_name=self.collection_name,
+                limit=fetch_limit,
+                output_fields=output_fields,
+                filter=where,
             )
-
-        # Vector search path
-        results = self.client.search(
-            collection_name=self.collection_name,
-            data=[vector],
-            limit=fetch_limit,
-            output_fields=output_fields,
-            filter=where,
-        )
-
-        # MilvusClient returns list of lists, apply offset
-        hits = results[0][offset:] if results else []
+            # Query returns flat list, apply offset directly
+            hits = results[offset:] if results else []
+        else:
+            # Vector search path returns list of lists
+            results = self.client.search(
+                collection_name=self.collection_name,
+                data=[vector],
+                limit=fetch_limit,
+                output_fields=output_fields,
+                filter=where,
+                anns_field="vector",
+            )
+            # Search returns list of lists, extract first result set and apply offset
+            hits = results[0][offset:] if results else []
 
         # Convert to VectorDocument instances
         vector_docs = []

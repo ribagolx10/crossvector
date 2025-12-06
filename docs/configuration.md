@@ -40,7 +40,7 @@ MILVUS_API_KEY=...
 # PgVector Configuration
 PGVECTOR_HOST=localhost
 PGVECTOR_PORT=5432
-PGVECTOR_DBNAME=vector_db
+VECTOR_COLLECTION_NAME=vector_db
 PGVECTOR_USER=postgres
 PGVECTOR_PASSWORD=postgres
 
@@ -65,27 +65,36 @@ LOG_LEVEL=INFO
 
 ```bash
 OPENAI_API_KEY=sk-...              # Required: Your OpenAI API key
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small  # Optional: Model name
 ```
 
-Supported models:
+Supported models (defaults to `text-embedding-3-small`):
 
-- `text-embedding-3-small` (1536 dims, default)
+- `text-embedding-3-small` (1536 dims)
 - `text-embedding-3-large` (3072 dims)
 - `text-embedding-ada-002` (1536 dims, legacy)
 
 #### Gemini
 
 ```bash
-GOOGLE_API_KEY=AI...               # Required: Your Google API key
-GEMINI_API_KEY=AI...               # Alternative: Alias for GOOGLE_API_KEY
-GEMINI_EMBEDDING_MODEL=gemini-embedding-001  # Optional: Model name
+GEMINI_API_KEY=AI...               # Required: Your Gemini API key
 ```
 
-Supported models:
+Supported models (defaults to `gemini-embedding-001`):
 
-- `gemini-embedding-001` (768, 1536, or 3072 dims)
-- `text-embedding-004` (768 dims)
+- `gemini-embedding-001` (768-3072 dims, recommended)
+- `text-embedding-005` (768 dims)
+- `text-embedding-004` (768 dims, legacy)
+
+#### Shared Embedding Model (Optional)
+
+```bash
+# Override default model for all embedding adapters
+VECTOR_EMBEDDING_MODEL=gemini-embedding-001
+```
+
+If not set, each adapter uses its own default:
+- OpenAI: `text-embedding-3-small`
+- Gemini: `gemini-embedding-001`
 
 ### Database Settings
 
@@ -109,24 +118,46 @@ CHROMA_TENANT=...       # Required for cloud
 CHROMA_DATABASE=...     # Required for cloud
 ```
 
-**Self-Hosted Mode:**
+**Self-Hosted HTTP Mode:**
 
 ```bash
 CHROMA_HOST=localhost   # Required for self-hosted
 CHROMA_PORT=8000        # Optional: Default 8000
+# IMPORTANT: Must NOT set CHROMA_PERSIST_DIR when using HTTP mode
 ```
 
 **Local Persistence Mode:**
 
 ```bash
 CHROMA_PERSIST_DIR=./chroma_data  # Required for local
+# IMPORTANT: Must NOT set CHROMA_HOST when using local mode
 ```
 
-ChromaDB automatically selects mode based on available env vars:
+**Configuration Priority and Validation:**
 
-1. Cloud (if `CHROMA_API_KEY` is set)
-2. HTTP (if `CHROMA_HOST` is set)
-3. Local (if `CHROMA_PERSIST_DIR` is set or fallback)
+ChromaDB adapter uses strict configuration validation with this priority:
+
+1. **Cloud** (if `CHROMA_API_KEY` is set)
+2. **HTTP** (if `CHROMA_HOST` is set AND `CHROMA_PERSIST_DIR` is NOT set)
+3. **Local** (if `CHROMA_PERSIST_DIR` is set OR neither HTTP nor Cloud configured)
+
+**Important:** Cannot set both `CHROMA_HOST` and `CHROMA_PERSIST_DIR` simultaneously. This will raise `MissingConfigError` with a helpful message explaining the conflict.
+
+```python
+# ✅ Valid configurations:
+# Cloud only
+CHROMA_API_KEY="..."
+
+# HTTP only
+CHROMA_HOST="localhost"
+
+# Local only
+CHROMA_PERSIST_DIR="./data"
+
+# ❌ Invalid - raises MissingConfigError:
+CHROMA_HOST="localhost"
+CHROMA_PERSIST_DIR="./data"  # Conflict!
+```
 
 #### Milvus
 
@@ -146,12 +177,12 @@ MILVUS_API_ENDPOINT=http://localhost:19530
 ```bash
 PGVECTOR_HOST=localhost      # Required: PostgreSQL host
 PGVECTOR_PORT=5432          # Optional: Default 5432
-PGVECTOR_DBNAME=vector_db   # Required: Database name
+VECTOR_COLLECTION_NAME=vector_db   # Required: Database name
 PGVECTOR_USER=postgres      # Optional: Default postgres
 PGVECTOR_PASSWORD=postgres  # Optional: Default postgres
 ```
 
-**Important**: `PGVECTOR_DBNAME` is required. CrossVector will attempt to create the database if it doesn't exist (requires CREATEDB privilege).
+**Important**: `VECTOR_COLLECTION_NAME` is required. CrossVector will attempt to create the database if it doesn't exist (requires CREATEDB privilege).
 
 ### Vector Settings
 
@@ -366,10 +397,10 @@ def validate_config():
             config_key="OPENAI_API_KEY",
             hint="Add OPENAI_API_KEY to your .env file"
         )
-    if not settings.PGVECTOR_DBNAME:
+    if not settings.VECTOR_COLLECTION_NAME:
         raise MissingConfigError(
-            "PGVECTOR_DBNAME is required",
-            config_key="PGVECTOR_DBNAME"
+            "VECTOR_COLLECTION_NAME is required",
+            config_key="VECTOR_COLLECTION_NAME"
         )
 
 validate_config()
@@ -401,7 +432,7 @@ Create a `.env.example` file:
 OPENAI_API_KEY=your-key-here
 
 # PgVector (required)
-PGVECTOR_DBNAME=your-database-name
+VECTOR_COLLECTION_NAME=your-database-name
 PGVECTOR_HOST=localhost
 PGVECTOR_PASSWORD=your-password
 

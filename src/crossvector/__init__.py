@@ -8,7 +8,7 @@ from .engine import VectorEngine
 from .schema import VectorDocument
 from .types import Doc, DocId, DocIds
 
-__version__ = "0.1.3"
+__version__ = "1.0.0"
 
 __all__ = [
     "VectorEngine",

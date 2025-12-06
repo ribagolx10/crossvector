@@ -47,7 +47,7 @@ class VectorEngine:
         self,
         db: VectorDBAdapter,
         embedding: EmbeddingAdapter,
-        collection_name: str = settings.ASTRA_DB_COLLECTION_NAME,
+        collection_name: str = settings.VECTOR_COLLECTION_NAME,
         store_text: bool = settings.VECTOR_STORE_TEXT,
     ) -> None:
         """Initialize VectorEngine with database and embedding adapters.
@@ -70,7 +70,7 @@ class VectorEngine:
         try:
             self._db.initialize(
                 collection_name=collection_name,
-                embedding_dimension=self._embedding.embedding_dimension,
+                dim=self._embedding.dim,
                 metric="cosine",
                 store_text=store_text,
             )
@@ -717,3 +717,20 @@ class VectorEngine:
             Collection object (adapter-specific type)
         """
         return self.db.get_or_create_collection(collection_name, dimension, metric)
+
+    def drop_collection(self, collection_name: str | None = None) -> bool:
+        """Drop/delete a collection from the database.
+
+        Args:
+            collection_name: Name of collection to drop (defaults to engine's active collection)
+
+        Returns:
+            True if successful
+
+        Examples:
+            >>> engine.drop_collection("old_collection")
+            >>> engine.drop_collection()  # Drops current collection
+        """
+        target_name = collection_name or self.collection_name
+        self.logger.message("Drop collection name=%s", target_name)
+        return self.db.drop_collection(target_name)

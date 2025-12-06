@@ -12,12 +12,7 @@ class MockEmbeddingAdapter(EmbeddingAdapter):
     """Mock embedding adapter for testing."""
 
     def __init__(self, dimension=1536):
-        super().__init__("mock-model")
-        self._dimension = dimension
-
-    @property
-    def embedding_dimension(self) -> int:
-        return self._dimension
+        super().__init__("mock-model", dim=dimension)
 
     def get_embeddings(self, texts):
         # Deterministic per-text embedding (value derived from text ord sums)
@@ -25,7 +20,7 @@ class MockEmbeddingAdapter(EmbeddingAdapter):
         for t in texts:
             seed = sum(ord(c) for c in t) % 100
             base = (seed / 100.0) or 0.01
-            vectors.append([base] * self._dimension)
+            vectors.append([base] * self.dim)
         return vectors
 
 
@@ -37,22 +32,21 @@ class MockDBAdapter(VectorDBAdapter):
     def __init__(self):
         self.documents = {}
         self.collection_initialized = False
+        self.store_text = True  # Default value
 
-    def initialize(
-        self, collection_name: str, embedding_dimension: int, metric: str = "cosine", store_text: bool = True
-    ):
+    def initialize(self, collection_name: str, dim: int, metric: str = "cosine", store_text: bool = True):
         self.collection_initialized = True
         self.collection_name = collection_name
-        self.embedding_dimension = embedding_dimension
+        self.dim = dim
         self.store_text = store_text
 
-    def add_collection(self, collection_name: str, dimension: int, metric: str = "cosine") -> None:
+    def add_collection(self, collection_name: str, dim: int, metric: str = "cosine") -> None:
         pass
 
     def get_collection(self, collection_name: str):
         return f"mock_collection_{collection_name}"
 
-    def get_or_create_collection(self, collection_name: str, dimension: int, metric: str = "cosine"):
+    def get_or_create_collection(self, collection_name: str, dim: int, metric: str = "cosine"):
         return f"mock_collection_{collection_name}"
 
     def upsert(self, documents: List[VectorDocument], batch_size: int | None = None) -> List[VectorDocument]:
@@ -339,7 +333,7 @@ class TestVectorEngine:
         assert "$vector" in stored_doc or "vector" in stored_doc
         assert stored_doc["_id"] == sample_documents["pks"][0]
         vector_key = "$vector" if "$vector" in stored_doc else "vector"
-        assert len(stored_doc[vector_key]) == embedding.embedding_dimension
+        assert len(stored_doc[vector_key]) == embedding.dim
 
     def test_create_without_store_text(self, sample_documents):
         """Test creating documents with store_text=False."""
@@ -366,7 +360,7 @@ class TestVectorEngine:
         # Text should NOT be present
         assert "text" not in stored_doc
         assert stored_doc["_id"] == sample_documents["pks"][0]
-        assert len(stored_doc[vector_key]) == embedding.embedding_dimension
+        assert len(stored_doc[vector_key]) == embedding.dim
 
     def test_auto_generated_pk(self):
         """Test that pk is automatically generated if not provided."""
@@ -391,7 +385,7 @@ class TestVectorEngine:
         engine = VectorEngine(embedding=embedding, db=db, collection_name="test_collection")
         doc = engine.create("Simple text document")
         assert doc.pk in db.documents
-        assert doc.vector and len(doc.vector) == embedding.embedding_dimension
+        assert doc.vector and len(doc.vector) == embedding.dim
 
     def test_update_document_regenerates_embedding(self):
         embedding = MockEmbeddingAdapter()

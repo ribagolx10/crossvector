@@ -57,28 +57,15 @@ class AstraDBAdapter(VectorDBAdapter):
 
     Attributes:
         collection_name: Name of the active collection
-        embedding_dimension: Dimension of vector embeddings
+        dim: Dimension of vector embeddings
         store_text: Whether to store original text with vectors
         collection: Active AstraDB collection instance
     """
 
+    _db: Database | None = None
     use_dollar_vector: bool = True
     where_compiler: AstraDBWhereCompiler = astradb_where
     supports_metadata_only: bool = True  # Allow metadata-only filtering without vector
-
-    def __init__(self, **kwargs: Any):
-        """Initialize the AstraDB adapter with lazy client setup.
-
-        Args:
-            **kwargs: Additional configuration options (currently unused)
-        """
-        super(AstraDBAdapter, self).__init__(**kwargs)
-        self._client: DataAPIClient | None = None
-        self._db: Database | None = None
-        self.collection: Collection | None = None
-        self.collection_name: str | None = None
-        self.embedding_dimension: int | None = None
-        self.store_text: bool = True
 
     @property
     def client(self) -> DataAPIClient:
@@ -122,6 +109,20 @@ class AstraDBAdapter(VectorDBAdapter):
             self.logger.message("AstraDB database connection established.")
         return self._db
 
+    @property
+    def collection(self) -> Collection[DOC] | None:
+        """Return the active AstraDB collection instance.
+
+        Returns:
+            Collection instance or None if not initialized
+        """
+        return self._collection
+
+    @collection.setter
+    def collection(self, value: Collection[DOC] | None) -> None:
+        """Set the collection object."""
+        self._collection = value
+
     # ------------------------------------------------------------------
     # Collection Management
     # ------------------------------------------------------------------
@@ -129,7 +130,7 @@ class AstraDBAdapter(VectorDBAdapter):
     def initialize(
         self,
         collection_name: str,
-        embedding_dimension: int,
+        dim: int,
         metric: str | None = None,
         store_text: bool | None = None,
         **kwargs: Any,
@@ -138,7 +139,7 @@ class AstraDBAdapter(VectorDBAdapter):
 
         Args:
             collection_name: Name of the collection to use/create
-            embedding_dimension: Dimension of the vector embeddings
+            dim: Dimension of the vector embeddings
             metric: Distance metric ('cosine', 'euclidean', 'dot_product')
             store_text: Whether to store original text content
             **kwargs: Additional configuration options
@@ -146,20 +147,18 @@ class AstraDBAdapter(VectorDBAdapter):
         self.store_text = store_text if store_text is not None else api_settings.VECTOR_STORE_TEXT
         if metric is None:
             metric = api_settings.VECTOR_METRIC or VectorMetric.COSINE
-        self.get_or_create_collection(collection_name, embedding_dimension, metric)
+        self.get_or_create_collection(collection_name, dim, metric)
         self.logger.message(
             f"AstraDB initialized: collection='{collection_name}', "
-            f"dimension={embedding_dimension}, metric={metric}, store_text={self.store_text}"
+            f"dimension={dim}, metric={metric}, store_text={self.store_text}"
         )
 
-    def add_collection(
-        self, collection_name: str, embedding_dimension: int, metric: str = VectorMetric.COSINE
-    ) -> Collection[DOC]:
+    def add_collection(self, collection_name: str, dim: int, metric: str = VectorMetric.COSINE) -> Collection[DOC]:
         """Create a new AstraDB collection.
 
         Args:
             collection_name: Name of the collection to create
-            embedding_dimension: Vector embedding dimension
+            dim: Vector embedding dimension
             metric: Distance metric for vector search
 
         Returns:
@@ -173,7 +172,7 @@ class AstraDBAdapter(VectorDBAdapter):
             raise CollectionExistsError("Collection already exists", collection_name=collection_name)
 
         self.collection_name = collection_name
-        self.embedding_dimension = embedding_dimension
+        self.dim = dim
         if not hasattr(self, "store_text"):
             self.store_text = True
 
@@ -182,7 +181,7 @@ class AstraDBAdapter(VectorDBAdapter):
             collection_name,
             definition=CollectionDefinition(
                 vector=CollectionVectorOptions(
-                    dimension=embedding_dimension,
+                    dimension=dim,
                     metric=vector_metric,
                 ),
             ),
@@ -212,7 +211,7 @@ class AstraDBAdapter(VectorDBAdapter):
         return self.collection
 
     def get_or_create_collection(
-        self, collection_name: str, embedding_dimension: int, metric: str = VectorMetric.COSINE
+        self, collection_name: str, dim: int, metric: str = VectorMetric.COSINE
     ) -> Collection[DOC]:
         """Get or create the underlying AstraDB collection.
 
@@ -222,7 +221,7 @@ class AstraDBAdapter(VectorDBAdapter):
 
         Args:
             collection_name: Name of the collection
-            embedding_dimension: Vector embedding dimension
+            dim: Vector embedding dimension
             metric: Distance metric for vector search
 
         Returns:
@@ -237,7 +236,7 @@ class AstraDBAdapter(VectorDBAdapter):
         """
         try:
             self.collection_name = collection_name
-            self.embedding_dimension = embedding_dimension
+            self.dim = dim
             if not hasattr(self, "store_text"):
                 self.store_text = True
 
@@ -253,7 +252,7 @@ class AstraDBAdapter(VectorDBAdapter):
                     collection_name,
                     definition=CollectionDefinition(
                         vector=CollectionVectorOptions(
-                            dimension=embedding_dimension,
+                            dimension=dim,
                             metric=vector_metric,
                         ),
                     ),

@@ -21,8 +21,8 @@ CrossVector is designed as a unified interface for multiple vector database back
 │  └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
                     │                      │
-         ┌──────────┴──────────┐          │
-         ▼                     ▼          ▼
+         ┌──────────┴──────────┐           │
+         ▼                     ▼           ▼
 ┌──────────────────┐  ┌─────────────────────────┐
 │ EmbeddingAdapter │  │   VectorDBAdapter       │
 │  • OpenAI        │  │   • AstraDB             │
@@ -97,46 +97,96 @@ All inputs are normalized to `VectorDocument` via `_normalize_document()`.
 
 ### VectorDBAdapter (Abstract Base)
 
-Abstract interface for vector database backends.
+Abstract interface for vector database backends with lazy initialization pattern.
+
+**Base Initialization:**
+
+```python
+class VectorDBAdapter(ABC):
+    def __init__(
+        self,
+        collection_name: str | None = None,
+        dim: int | None = None,
+        store_text: bool | None = None,
+        logger: Logger = None,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize with lazy client/collection initialization."""
+        self._client: Any = None  # Initialized by ABC
+        self._collection: Any = None  # Initialized by ABC
+        self.collection_name = collection_name or api_settings.VECTOR_COLLECTION_NAME
+        self.dim = dim or api_settings.VECTOR_DIM
+        self.store_text = store_text or api_settings.VECTOR_STORE_TEXT
+```
 
 **Required Methods:**
 
 ```python
 class VectorDBAdapter(ABC):
     @abstractmethod
-    def add_collection(self, collection_name, dimension) -> bool
+    def initialize(self, collection_name, dim, metric, **kwargs) -> None
 
     @abstractmethod
-    def insert(self, collection_name, documents) -> List[VectorDocument]
+    def add_collection(self, collection_name, dim, metric) -> Any
+
+    @abstractmethod
+    def get_collection(self, collection_name) -> Any
+
+    @abstractmethod
+    def get_or_create_collection(self, collection_name, dim, metric) -> Any
+
+    @abstractmethod
+    def create(self, doc: VectorDocument) -> VectorDocument
+
+    @abstractmethod
+    def bulk_create(self, docs: List[VectorDocument], **kwargs) -> List[VectorDocument]
 
     @abstractmethod
     def search(
         self,
-        collection_name,
-        query_vector,
-        where=None,
-        limit=10
+        vector: List[float] | None,
+        where: Dict[str, Any] | None,
+        limit: int,
+        offset: int
     ) -> List[VectorDocument]
 
     @abstractmethod
-    def get_by_id(self, collection_name, doc_id) -> VectorDocument
+    def get(self, *args, **kwargs) -> VectorDocument
 
     @abstractmethod
-    def update(self, collection_name, document) -> VectorDocument
+    def update(self, doc: VectorDocument, **kwargs) -> VectorDocument
 
     @abstractmethod
-    def delete(self, collection_name, ids) -> int
+    def delete(self, ids: DocIds) -> int
 
     @abstractmethod
-    def count(self, collection_name) -> int
+    def count(self) -> int
 ```
 
 **Capabilities:**
 
 ```python
 class VectorDBAdapter:
-    SUPPORTS_METADATA_ONLY: bool = True
-    # Whether backend supports search without vector
+    use_dollar_vector: bool = False  # Use '$vector' vs 'vector' key
+    supports_metadata_only: bool = False  # Search without vector
+    where_compiler: BaseWhere = None  # Backend-specific filter compiler
+```
+
+**Lazy Initialization Pattern:**
+
+All adapters use lazy initialization for optimal resource usage:
+
+```python
+@property
+def client(self):
+    """Lazily initialize and return the database client."""
+    if self._client is None:
+        # Validate configuration
+        if not api_settings.REQUIRED_CONFIG:
+            raise MissingConfigError(...)
+        # Initialize client
+        self._client = create_client(...)
+    return self._client
 ```
 
 ---
@@ -398,7 +448,7 @@ settings = CrossVectorSettings(
 ```
 1. Default values (in CrossVectorSettings)
    ↓
-2. Environment variables (OPENAI_API_KEY, PGVECTOR_DBNAME, etc.)
+2. Environment variables (OPENAI_API_KEY, VECTOR_COLLECTION_NAME, etc.)
    ↓
 3. Programmatic config (passed to constructors)
 ```
@@ -417,7 +467,7 @@ class CrossVectorSettings(BaseSettings):
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
 
     # PgVector
-    PGVECTOR_DBNAME: str
+    VECTOR_COLLECTION_NAME: str
     PGVECTOR_HOST: str = "localhost"
     PGVECTOR_PORT: int = 5432
 
@@ -600,6 +650,65 @@ for page in range(10):
 
 ---
 
+## Error Handling
+
+### Exception Hierarchy
+
+CrossVector provides structured exceptions with detailed context:
+
+```python
+from crossvector.exceptions import (
+    MissingConfigError,      # Configuration errors
+    CollectionNotFoundError, # Collection operations
+    DocumentNotFoundError,   # Document operations
+    SearchError,            # Search failures
+    ConnectionError,        # Connection failures
+)
+```
+
+### Configuration Validation
+
+Strict validation with helpful error messages:
+
+```python
+# ChromaDB config conflict
+CHROMA_HOST="localhost"
+CHROMA_PERSIST_DIR="./data"
+
+# Raises MissingConfigError:
+# "Cannot set both CHROMA_HOST and CHROMA_PERSIST_DIR.
+#  Choose one deployment mode:
+#  - For HTTP: Set CHROMA_HOST (unset CHROMA_PERSIST_DIR)
+#  - For Local: Set CHROMA_PERSIST_DIR (unset CHROMA_HOST)"
+```
+
+### Lazy Initialization Errors
+
+Errors are raised when client is first accessed:
+
+```python
+db = ChromaAdapter()  # No error yet
+
+# Error raised here when client property accessed:
+engine = VectorEngine(db=db, embedding=...)
+# MissingConfigError if config invalid
+```
+
+### Error Context
+
+All exceptions include contextual information:
+
+```python
+try:
+    doc = engine.get(id="nonexistent")
+except DocumentNotFoundError as e:
+    print(e.document_id)  # "nonexistent"
+    print(e.operation)    # "get"
+    print(e.adapter)      # "ChromaAdapter"
+```
+
+---
+
 ## Testing Architecture
 
 ### Test Structure
@@ -610,7 +719,7 @@ tests/
 ├── test_engine.py           # VectorEngine tests
 ├── test_openai_embeddings.py
 ├── test_gemini_embeddings.py
-└── backend.py               # Integration tests
+└── test_querydsl_operators.py
 
 scripts/
 └── tests/

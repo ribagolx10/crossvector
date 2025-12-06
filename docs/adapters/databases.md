@@ -148,6 +148,10 @@ Open-source embedding database with Python-first API.
 
 - ⚠️ **Flattened metadata** - No nested object support (auto-flattened)
 - ✅ **Metadata-only search** - Filter without vector similarity
+- ✅ **Multiple deployment modes** - Cloud, HTTP, or local persistence
+- ✅ **Strict config validation** - Prevents conflicting settings
+- ✅ **Explicit imports** - Clear dependency management
+- ✅ **Lazy initialization** - Optimal resource usage
 - ✅ **Common operators** - All 8 operators supported
 - ✅ **In-memory/persistent** - Multiple storage backends
 - ✅ **Open source** - Apache 2.0 license
@@ -164,38 +168,60 @@ pip install crossvector[chroma-cloud]
 
 ### Configuration
 
-**Local/In-Memory:**
-
-```python
-from crossvector.dbs.chroma import ChromaDBAdapter
-
-# In-memory
-db = ChromaDBAdapter()
-
-# Persistent
-db = ChromaDBAdapter(
-    host="localhost",
-    port=8000,
-    persist_directory="./chroma_data"
-)
-```
-
-**ChromaDB Cloud:**
+**Environment Variables:**
 
 ```bash
-CHROMA_CLOUD_API_KEY="your-api-key"
-CHROMA_CLOUD_TENANT="tenant-name"
-CHROMA_CLOUD_DATABASE="database-name"
+# ChromaDB Cloud (priority 1)
+CHROMA_API_KEY="your-api-key"
+CHROMA_TENANT="tenant-name"
+CHROMA_DATABASE="database-name"
+
+# Self-hosted HTTP (priority 2, requires no CHROMA_PERSIST_DIR)
+CHROMA_HOST="localhost"
+CHROMA_PORT="8000"
+
+# Local persistence (priority 3, requires no CHROMA_HOST)
+CHROMA_PERSIST_DIR="./chroma_data"
 ```
 
-```python
-from crossvector.dbs.chroma import ChromaDBAdapter
+**Important:** Cannot set both `CHROMA_HOST` and `CHROMA_PERSIST_DIR`. Choose one deployment mode:
+- **Cloud**: Set `CHROMA_API_KEY`
+- **HTTP**: Set `CHROMA_HOST` (not `CHROMA_PERSIST_DIR`)
+- **Local**: Set `CHROMA_PERSIST_DIR` (not `CHROMA_HOST`)
 
-db = ChromaDBAdapter(
-    api_key="your-api-key",
-    tenant="tenant-name",
-    database="database-name"
-)
+**Programmatic:**
+
+```python
+from crossvector.dbs.chroma import ChromaAdapter
+
+# Cloud mode
+db = ChromaAdapter()  # Uses CHROMA_API_KEY from env
+
+# HTTP mode
+db = ChromaAdapter()  # Uses CHROMA_HOST from env
+
+# Local mode
+db = ChromaAdapter()  # Uses CHROMA_PERSIST_DIR from env
+```
+
+**Configuration Validation:**
+
+CrossVector enforces strict configuration validation:
+
+```python
+# ✅ Valid: Cloud only
+CHROMA_API_KEY="..."
+
+# ✅ Valid: HTTP only
+CHROMA_HOST="localhost"
+
+# ✅ Valid: Local only
+CHROMA_PERSIST_DIR="./data"
+
+# ❌ Invalid: Conflicting settings
+CHROMA_HOST="localhost"
+CHROMA_PERSIST_DIR="./data"
+# Raises: MissingConfigError with helpful message
 ```
 
 ### Schema
@@ -275,18 +301,31 @@ results = engine.search(
 ### Best Practices
 
 ```python
-# Use flat metadata structure
+# Use flat metadata structure for best compatibility
 metadata = {
     "category": "tech",
     "author_name": "John",  # Flat instead of author.name
     "author_role": "admin"
 }
 
-# Persistent storage for production
-db = ChromaDBAdapter(persist_directory="/data/chroma")
+# Choose deployment mode explicitly
+# Option 1: Cloud (managed)
+CHROMA_API_KEY="..."
 
-# Batch operations
+# Option 2: Self-hosted HTTP server
+CHROMA_HOST="localhost"
+
+# Option 3: Local persistence (development)
+CHROMA_PERSIST_DIR="./chroma_data"
+
+# Don't mix deployment modes - causes MissingConfigError
+# ❌ Don't do: CHROMA_HOST + CHROMA_PERSIST_DIR
+
+# Batch operations for efficiency
 engine.bulk_create(docs, batch_size=100)
+
+# Leverage lazy initialization
+db = ChromaAdapter()  # Client created only when first used
 ```
 
 ---
@@ -297,11 +336,12 @@ High-performance distributed vector database.
 
 ### Features
 
-- ✅ **Full nested metadata** - JSON field support
-- ❌ **Requires vector** - All queries need vector input
+- ✅ **Full nested metadata** - JSON field support (via dynamic fields)
+- ✅ **Metadata-only search** - Query without vector via `query()` method
 - ✅ **Common operators** - All 8 operators supported
 - ✅ **High performance** - Distributed architecture
 - ✅ **Scalable** - Horizontal scaling
+- ✅ **Lazy initialization** - Optimal resource usage
 
 ### Installation
 
@@ -467,7 +507,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 **Environment Variables:**
 
 ```bash
-PGVECTOR_DBNAME="vectordb"
+VECTOR_COLLECTION_NAME="vectordb"
 PGVECTOR_HOST="localhost"
 PGVECTOR_PORT="5432"
 PGVECTOR_USER="postgres"
@@ -493,7 +533,7 @@ db = PgVectorAdapter(
 PgVector stores metadata as JSONB:
 
 ```sql
-CREATE TABLE vector_documents (
+CREATE TABLE vector_db (
     id TEXT PRIMARY KEY,
     vector vector(1536),
     text TEXT,
@@ -584,15 +624,15 @@ results = engine.search(
 
 ```sql
 -- Create IVFFlat index for faster vector search
-CREATE INDEX ON vector_documents
+CREATE INDEX ON vector_db
 USING ivfflat (vector vector_cosine_ops)
 WITH (lists = 100);
 
 -- Create GIN index for metadata queries
-CREATE INDEX ON vector_documents USING GIN (metadata);
+CREATE INDEX ON vector_db USING GIN (metadata);
 
 -- Create index on specific nested field
-CREATE INDEX ON vector_documents ((metadata->>'category'));
+CREATE INDEX ON vector_db ((metadata->>'category'));
 ```
 
 ### Best Practices
@@ -609,7 +649,7 @@ metadata = {"score": "0.95"}  # Auto-cast in comparisons
 metadata = {"score": 0.95}    # Direct numeric
 
 # Index frequently queried fields
-# CREATE INDEX ON vector_documents ((metadata->>'category'));
+# CREATE INDEX ON vector_db ((metadata->>'category'));
 
 # Batch operations with transactions
 engine.bulk_create(docs, batch_size=500)

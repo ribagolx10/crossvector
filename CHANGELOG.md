@@ -1,5 +1,89 @@
 # CrossVector - Changelog
 
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.0.0] - 2025-12-06 🎉
+
+**First Production Release!**
+
+### Added
+
+**Benchmarking System:**
+- Created comprehensive `scripts/benchmark.py` tool for performance testing
+- Support for 4 database backends (pgvector, astradb, milvus, chroma)
+- Support for 2 embedding providers (OpenAI, Gemini)
+- 7 operation types tested: bulk/individual create, vector/metadata search, Query DSL operators, update, delete
+- `--skip-slow` flag to skip cloud backends for faster local testing
+- Smart Query DSL optimization: 4 operators for slow backends, 10 for fast backends
+- Detailed markdown reports with performance metrics
+- Performance summary shows tested vs skipped backends clearly
+
+**Engine Improvements:**
+- Added `VectorEngine.drop_collection()` method for collection cleanup
+- Better collection lifecycle management
+
+**Documentation:**
+- Added benchmarking section to README.md (102 lines)
+- Created comprehensive `docs/benchmarking.md` guide (385 lines)
+- Updated `docs/contributing.md` with benchmarking workflow
+- Added usage examples and best practices
+- Cost estimation and troubleshooting guides
+
+**Testing:**
+- Added 50+ new unit tests
+- Test coverage for ABC adapters (82%)
+- Test coverage for logger (100%)
+- Extended engine tests
+- Schema, utils, and Q object coverage tests
+- Total: 365 tests passing (from ~300)
+
+**Architecture:**
+- Enhanced ABC base class with unified initialization
+- Improved adapter architecture
+- Better error reporting in benchmarks
+- Truncated error messages in reports for readability
+
+### Changed
+
+- Collection name defaults now use `api_settings.VECTOR_COLLECTION_NAME` instead of class constant
+- Improved Milvus metadata-only search support verification
+- Updated all adapter documentation
+- Modernized contributing.md with uv, pre-commit, ruff
+
+### Removed
+
+- Removed `scripts/e2e.py` (replaced with `pytest scripts/tests`)
+- Removed `DEFAULT_COLLECTION_NAME` class constant from adapters
+
+### Fixed
+
+- Fixed Milvus tests to verify metadata-only search functionality
+- Fixed collection name handling across all adapters
+- Better error messages in benchmark reports
+- Proper cleanup in benchmark tests
+
+### Breaking Changes
+
+- `DEFAULT_COLLECTION_NAME` class constant removed - use `api_settings.VECTOR_COLLECTION_NAME` in settings instead
+- Stricter ChromaDB config validation (prevents conflicting settings)
+
+### Performance
+
+- Benchmark results show ~60% reduction in API calls for cloud backends with optimization
+- Local testing with `--skip-slow`: ~2-3 minutes vs 10+ minutes
+- PgVector: ~6-10 docs/sec bulk create, ~0.5ms metadata queries
+- Gemini: 1.5x faster search vs OpenAI for same operations
+
+### Documentation Updates
+
+- Repository URLs and references updated
+- Enhanced architecture diagrams
+- Improved API documentation
+- Fixed all broken links
+
 ## [0.1.3] - 2025-11-30
 
 ### Testing Infrastructure

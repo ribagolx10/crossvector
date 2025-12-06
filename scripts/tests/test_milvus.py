@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from crossvector import VectorEngine
 from crossvector.dbs.milvus import MilvusAdapter
 from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
-from crossvector.exceptions import MissingConfigError, SearchError
+from crossvector.exceptions import MissingConfigError
 from crossvector.querydsl import Q
 
 load_dotenv()
@@ -23,8 +23,8 @@ def milvus_engine():
         embedding = OpenAIEmbeddingAdapter(model_name="text-embedding-3-small")
         db = MilvusAdapter()
         engine = VectorEngine(
-            embedding=embedding,
             db=db,
+            embedding=embedding,
             collection_name="test_crossvector",
             store_text=True,
         )
@@ -37,8 +37,8 @@ def milvus_engine():
 
         # Reinitialize
         engine = VectorEngine(
-            embedding=embedding,
             db=db,
+            embedding=embedding,
             collection_name="test_crossvector",
             store_text=True,
         )
@@ -152,13 +152,12 @@ class TestMilvus:
         )
         assert len(results) == 3  # 2 tech docs from 2024 + 1 travel doc
 
-    def test_metadata_only_not_supported(self, milvus_engine, sample_docs):
-        """Test that metadata-only search raises error (Milvus requires vector)."""
-        # Milvus does not support metadata-only search via engine
-        from crossvector.exceptions import InvalidFieldError
-
-        with pytest.raises(InvalidFieldError, match="vector.*required"):
-            milvus_engine.search(where=Q(category="tech"), limit=10)
+    def test_metadata_only_search_supported(self, milvus_engine, sample_docs):
+        """Test that metadata-only search works (Milvus supports query without vector)."""
+        # Milvus supports metadata-only search via query() method
+        results = milvus_engine.search(where=Q(category="tech"), limit=10)
+        assert len(results) == 3
+        assert all(doc.metadata.get("category") == "tech" for doc in results)
 
     def test_universal_dict_format(self, milvus_engine, sample_docs):
         """Test using universal dict format instead of Q objects."""
@@ -194,14 +193,15 @@ class TestMilvus:
         assert len(results) == 2
         assert all(80 <= doc.metadata.get("score") <= 90 for doc in results)
 
-    def test_vector_required_for_search(self, milvus_engine, sample_docs):
-        """Test that Milvus requires vector for all searches."""
-        # Adapter should not support metadata-only search
-        assert not milvus_engine.supports_metadata_only
+    def test_metadata_search_capability(self, milvus_engine, sample_docs):
+        """Test that Milvus supports metadata-only search."""
+        # Adapter should support metadata-only search
+        assert milvus_engine.supports_metadata_only
 
-        # Direct adapter call without vector should fail
-        with pytest.raises(SearchError):
-            milvus_engine.db.search(vector=None, where=Q(category="tech"), limit=10)
+        # Direct adapter call without vector should work
+        results = milvus_engine.db.search(vector=None, where=Q(category="tech"), limit=10)
+        assert len(results) == 3
+        assert all(doc.metadata.get("category") == "tech" for doc in results)
 
     def test_boolean_expression_compilation(self, milvus_engine, sample_docs):
         """Test that Q objects compile to Milvus boolean expressions."""
