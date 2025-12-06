@@ -1,31 +1,38 @@
 # CrossVector
 
-[![Beta Status](https://img.shields.io/badge/status-beta-orange)](https://github.com/thewebscraping/crossvector)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue)](https://github.com/thewebscraping/crossvector)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Tests](https://img.shields.io/badge/tests-365%20passing-brightgreen)](https://github.com/thewebscraping/crossvector)
 
 **A unified Python library for vector database operations with pluggable backends and embedding providers.**
 
 CrossVector provides a consistent, high-level API across multiple vector databases (AstraDB, ChromaDB, Milvus, PgVector) and embedding providers (OpenAI, Gemini), allowing you to switch between backends without rewriting your application code.
 
-## ⚠️ Beta Status
+## 🎯 Recommended Backends
 
-> **WARNING**: CrossVector is currently in **BETA**. Do not use in production until version 1.0 release.
->
-> - API may change without notice
-> - Database schemas may evolve
-> - Features are still being tested and refined
->
-> **Recommended for:**
->
-> - ✅ Prototyping and experimentation
-> - ✅ Development and testing environments
-> - ✅ Learning vector databases
->
-> **Not recommended for:**
->
-> - ❌ Production applications
-> - ❌ Mission-critical systems
+Based on our comprehensive benchmarking, we recommend:
+
+### **For Production:**
+
+- **🥇 ChromaDB Cloud** - Best for cloud deployments
+  - Hosted solution with excellent performance
+  - Easy setup and management
+  - Built-in scaling and backups
+  - Good for: SaaS applications, MVPs, rapid prototyping
+
+- **🥈 PgVector** - Best for self-hosted/on-premise
+  - Excellent performance (6-10 docs/sec bulk insert)
+  - Very fast metadata queries (<1ms)
+  - PostgreSQL reliability and ecosystem
+  - Good for: Enterprise, existing PostgreSQL infrastructure, cost-sensitive deployments
+
+### **Also Supported:**
+
+- **AstraDB** - DataStax managed Cassandra with vector support
+- **Milvus** - Purpose-built vector database for large-scale deployments
+
+See our [benchmarking guide](docs/benchmarking.md) for detailed performance comparisons.
 
 ---
 
