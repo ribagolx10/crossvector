@@ -573,7 +573,7 @@ GEMINI_API_KEY=AI...  # Get free key at https://makersuite.google.com/app/apikey
 ```
 
 **Supported Models:**
-- `gemini-embedding-001` (1536 dims, **recommended**)
+- `gemini-embedding-001` (768 dims, **recommended**)
 - `models/text-embedding-004` (768 dims)
 
 ### OpenAI (Alternative)
@@ -827,7 +827,7 @@ python scripts/benchmark.py --num-docs 1 --backends pgvector --embedding-provide
 python scripts/benchmark.py --num-docs 10
 
 # Step 3: Production benchmark with 1000 docs (30-60 minutes)
-python scripts/benchmark.py --num-docs 1000 --output benchmark_full.md
+python scripts/benchmark.py --num-docs 1000 --output benchmark.md
 ```
 
 ### Output
@@ -946,11 +946,11 @@ results = engine.search("query", limit=10)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        VectorEngine                          │
+│                        VectorEngine                         │
 │  (Unified API, automatic embedding, flexible input)         │
 └───────────────────┬──────────────────┬──────────────────────┘
                     │                  │
-        ┌───────────▼──────────┐  ┌───▼──────────────────┐
+        ┌───────────▼──────────┐  ┌───-▼─────────────────┐
         │  EmbeddingAdapter    │  │   VectorDBAdapter    │
         │  (OpenAI, Gemini)    │  │  (Astra, Chroma...)  │
         └──────────────────────┘  └──────────┬───────────┘
@@ -981,7 +981,7 @@ VectorDocument Results
 
 ## Roadmap
 
-- [ ] **v1.0 Stable Release**
+- [x] **v1.0 Stable Release**
   - API freeze and backwards compatibility guarantee
   - Production-ready documentation
   - Performance benchmarks
