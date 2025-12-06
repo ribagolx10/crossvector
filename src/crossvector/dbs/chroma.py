@@ -12,9 +12,9 @@ Key Features:
     - Automatic collection management and schema creation
 """
 
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Set, Union
 
-import chromadb
+from chromadb import Client, CloudClient, Collection, HttpClient
 from chromadb.config import Settings
 
 from crossvector.abc import VectorDBAdapter
@@ -27,6 +27,7 @@ from crossvector.exceptions import (
     DocumentNotFoundError,
     DoesNotExist,
     InvalidFieldError,
+    MissingConfigError,
     MissingDocumentError,
     MissingFieldError,
     MultipleObjectsReturned,
@@ -54,7 +55,7 @@ class ChromaAdapter(VectorDBAdapter):
 
     Attributes:
         collection_name: Name of the active collection
-        embedding_dimension: Dimension of vector embeddings
+        dim: Dimension of vector embeddings
         store_text: Whether to store original text with vectors
         metric: Distance metric for vector search
     """
@@ -64,107 +65,96 @@ class ChromaAdapter(VectorDBAdapter):
     # Capability flags
     supports_metadata_only: bool = True  # Chroma supports metadata-only filtering without vector
 
-    def __init__(self, **kwargs: Any):
-        """Initialize the ChromaDB adapter with lazy client setup.
-
-        Args:
-            **kwargs: Additional configuration options (currently unused)
-        """
-        super(ChromaAdapter, self).__init__(**kwargs)
-        self._client: chromadb.Client | None = None
-        self._collection: chromadb.Collection | None = None
-        self.collection_name: str | None = None
-        self.embedding_dimension: int | None = None
-
     @property
-    def client(self) -> chromadb.Client:
+    def client(self) -> Union[Client, CloudClient, HttpClient]:
         """Lazily initialize and return the ChromaDB client.
 
-        Attempts initialization in order:
-        1. CloudClient (if CHROMA_CLOUD_API_KEY present)
-        2. HttpClient (if CHROMA_HOST present)
-        3. Local persistence client (fallback)
+        Selects client based on configuration priority:
+        1. CloudClient (if CHROMA_API_KEY present)
+        2. HttpClient (if CHROMA_HOST present, requires CHROMA_HOST and no CHROMA_PERSIST_DIR)
+        3. Local persistence client (requires CHROMA_PERSIST_DIR or neither)
 
         Returns:
             Initialized ChromaDB client instance
 
         Raises:
-            MissingConfigError: If required configuration is missing
+            MissingConfigError: If configuration is missing or conflicting
             ConnectionError: If client initialization fails
         """
         if self._client is None:
             # 1) Try CloudClient if cloud API key present
             if api_settings.CHROMA_API_KEY:
                 try:
-                    self._client = chromadb.CloudClient(
+                    self._client = CloudClient(
                         tenant=api_settings.CHROMA_TENANT,
                         database=api_settings.CHROMA_DATABASE,
                         api_key=api_settings.CHROMA_API_KEY,
                     )
                     self.logger.message("ChromaDB CloudClient initialized.")
                     return self._client
-                except Exception:
-                    try:
-                        # Fallback: top-level CloudClient
-                        CloudClient = getattr(chromadb, "CloudClient", None)
-                        if CloudClient:
-                            self._client = CloudClient(
-                                tenant=api_settings.CHROMA_TENANT,
-                                database=api_settings.CHROMA_DATABASE,
-                                api_key=api_settings.CHROMA_API_KEY,
-                            )
-                            self.logger.message("ChromaDB CloudClient (top-level) initialized.")
-                            return self._client
-                    except Exception as exc:
-                        self.logger.error(
-                            f"Failed to initialize ChromaDB CloudClient, falling back. {exc}", exc_info=True
-                        )
-                        raise ConnectionError("Failed to initialize cloud ChromaDB client", adapter="ChromaDB")
+                except Exception as exc:
+                    raise ConnectionError(
+                        "Failed to initialize ChromaDB CloudClient",
+                        adapter="ChromaDB",
+                        original_error=str(exc),
+                    ) from exc
 
             # 2) Try HttpClient (self-hosted server) if host/port provided
             if api_settings.CHROMA_HOST:
+                # Validate: cannot specify both CHROMA_HOST and CHROMA_PERSIST_DIR
+                if api_settings.CHROMA_PERSIST_DIR:
+                    raise MissingConfigError(
+                        "Cannot specify both CHROMA_HOST and CHROMA_PERSIST_DIR. "
+                        "Choose one: either CHROMA_HOST (for remote server) or CHROMA_PERSIST_DIR (for local storage).",
+                        config_key="CHROMA_HOST/CHROMA_PERSIST_DIR",
+                        adapter="ChromaDB",
+                        hint="Set either CHROMA_HOST or CHROMA_PERSIST_DIR, not both.",
+                    )
+
                 try:
-                    HttpClient = getattr(chromadb, "HttpClient", None)
-                    if HttpClient:
-                        if api_settings.CHROMA_PORT:
-                            self._client = HttpClient(host=api_settings.CHROMA_HOST, port=int(api_settings.CHROMA_PORT))
-                        else:
-                            self._client = HttpClient(host=api_settings.CHROMA_HOST)
+                    if api_settings.CHROMA_PORT:
+                        self._client = HttpClient(host=api_settings.CHROMA_HOST, port=int(api_settings.CHROMA_PORT))
+                    else:
+                        self._client = HttpClient(host=api_settings.CHROMA_HOST)
 
-                        self.logger.message(
-                            f"ChromaDB HttpClient initialized (host={api_settings.CHROMA_HOST}, port={api_settings.CHROMA_PORT})."
-                        )
-                        return self._client
+                    self.logger.message(
+                        f"ChromaDB HttpClient initialized (host={api_settings.CHROMA_HOST}, port={api_settings.CHROMA_PORT})."
+                    )
+                    return self._client
                 except Exception as e:
-                    self.logger.error(f"Failed to initialize ChromaDB HttpClient; falling back. {e}", exc_info=True)
-                    raise ConnectionError("Failed to initialize self-hosted ChromaDB client", adapter="ChromaDB")
+                    raise ConnectionError(
+                        "Failed to initialize ChromaDB HttpClient",
+                        adapter="ChromaDB",
+                        original_error=str(e),
+                    ) from e
 
-            # 3) Fallback: local persistence client
+            # 3) Local persistence client
             persist_dir = api_settings.CHROMA_PERSIST_DIR
             settings_obj = Settings(persist_directory=persist_dir) if persist_dir else Settings()
             try:
-                self._client = chromadb.Client(settings_obj)
+                self._client = Client(settings_obj)
                 self.logger.message(f"ChromaDB local client initialized. Persist dir: {persist_dir}")
             except Exception as e:
-                self.logger.error(f"Failed to initialize local ChromaDB client: {e}", exc_info=True)
-                raise ConnectionError("Failed to initialize local ChromaDB client", adapter="ChromaDB")
+                raise ConnectionError(
+                    "Failed to initialize local ChromaDB client",
+                    adapter="ChromaDB",
+                    original_error=str(e),
+                ) from e
         return self._client
 
     @property
-    def collection(self) -> chromadb.Collection:
-        """Lazily initialize and return the ChromaDB collection.
+    def collection(self) -> Collection:
+        """Lazily return the cached ChromaDB collection instance.
 
         Returns:
-            Active ChromaDB collection instance
-
-        Raises:
-            ValueError: If collection_name or embedding_dimension not set
+            Active ChromaDB collection instance (may be None if not yet initialized)
         """
-        if not self.collection_name or not self.embedding_dimension:
-            raise CollectionNotInitializedError(
-                "Collection is not initialized", operation="property_access", adapter="ChromaDB"
-            )
-        return self.get_collection(self.collection_name)
+        return self._collection
+
+    @collection.setter
+    def collection(self, value: Collection | None) -> None:
+        """Set the collection instance."""
+        self._collection = value
 
     # ------------------------------------------------------------------
     # Collection Management
@@ -173,7 +163,7 @@ class ChromaAdapter(VectorDBAdapter):
     def initialize(
         self,
         collection_name: str,
-        embedding_dimension: int,
+        dim: int,
         metric: str | None = None,
         store_text: bool | None = None,
         **kwargs: Any,
@@ -182,7 +172,7 @@ class ChromaAdapter(VectorDBAdapter):
 
         Args:
             collection_name: Name of the collection to use/create
-            embedding_dimension: Dimension of the vector embeddings
+            dim: Dimension of the vector embeddings
             metric: Distance metric ('cosine', 'euclidean', 'dot_product')
             store_text: Whether to store original text content
             **kwargs: Additional configuration options
@@ -190,20 +180,18 @@ class ChromaAdapter(VectorDBAdapter):
         self.store_text = store_text if store_text is not None else api_settings.VECTOR_STORE_TEXT
         if metric is None:
             metric = api_settings.VECTOR_METRIC or VectorMetric.COSINE
-        self.get_or_create_collection(collection_name, embedding_dimension, metric)
+        self.get_or_create_collection(collection_name, dim, metric)
         self.logger.message(
             f"ChromaDB initialized: collection='{collection_name}', "
-            f"dimension={embedding_dimension}, metric={metric}, store_text={self.store_text}"
+            f"dimension={dim}, metric={metric}, store_text={self.store_text}"
         )
 
-    def add_collection(
-        self, collection_name: str, embedding_dimension: int, metric: str = VectorMetric.COSINE
-    ) -> chromadb.Collection:
+    def add_collection(self, collection_name: str, dim: int, metric: str = VectorMetric.COSINE) -> Collection:
         """Create a new ChromaDB collection.
 
         Args:
             collection_name: Name of the collection to create
-            embedding_dimension: Vector embedding dimension
+            dim: Vector embedding dimension
             metric: Distance metric for vector search
 
         Returns:
@@ -222,20 +210,20 @@ class ChromaAdapter(VectorDBAdapter):
                 raise CollectionExistsError("Collection already exists", collection_name=collection_name) from e
 
         self.collection_name = collection_name
-        self.embedding_dimension = embedding_dimension
+        self.dim = dim
         if not hasattr(self, "store_text"):
             self.store_text = True
 
         self.metric = VECTOR_METRIC_MAP.get(metric, VectorMetric.COSINE)
-        self._collection = self.client.create_collection(
+        self.collection = self.client.create_collection(
             name=collection_name,
             metadata={"hnsw:space": self.metric},
             embedding_function=None,
         )
         self.logger.message(f"ChromaDB collection '{collection_name}' created.")
-        return self._collection
+        return self.collection
 
-    def get_collection(self, collection_name: str) -> chromadb.Collection:
+    def get_collection(self, collection_name: str) -> Collection:
         """Get an existing ChromaDB collection.
 
         Args:
@@ -250,16 +238,14 @@ class ChromaAdapter(VectorDBAdapter):
             SearchError: If collection retrieval fails
         """
         try:
-            self._collection = self.client.get_collection(collection_name)
+            self.collection = self.client.get_collection(collection_name)
             self.collection_name = collection_name
             self.logger.message(f"ChromaDB collection '{collection_name}' retrieved.")
-            return self._collection
+            return self.collection
         except Exception as e:
             raise CollectionNotFoundError("Collection does not exist", collection_name=collection_name) from e
 
-    def get_or_create_collection(
-        self, collection_name: str, embedding_dimension: int, metric: str = VectorMetric.COSINE
-    ) -> chromadb.Collection:
+    def get_or_create_collection(self, collection_name: str, dim: int, metric: str = VectorMetric.COSINE) -> Collection:
         """Get or create the underlying ChromaDB collection.
 
         Ensures the collection exists with proper vector configuration.
@@ -268,7 +254,7 @@ class ChromaAdapter(VectorDBAdapter):
 
         Args:
             collection_name: Name of the collection
-            embedding_dimension: Vector embedding dimension
+            dim: Vector embedding dimension
             metric: Distance metric for vector search
 
         Returns:
@@ -282,25 +268,25 @@ class ChromaAdapter(VectorDBAdapter):
             SearchError: If collection creation or retrieval fails
         """
         self.collection_name = collection_name
-        self.embedding_dimension = embedding_dimension
+        self.dim = dim
         if not hasattr(self, "store_text"):
             self.store_text = True
 
         self.metric = VECTOR_METRIC_MAP.get(metric, VectorMetric.COSINE)
-        if self._collection is not None and getattr(self._collection, "name", None) == collection_name:
-            return self._collection
+        if self.collection is not None and getattr(self.collection, "name", None) == collection_name:
+            return self.collection
 
         try:
-            self._collection = self.client.get_collection(collection_name)
+            self.collection = self.client.get_collection(collection_name)
             self.logger.message(f"ChromaDB collection '{collection_name}' retrieved.")
         except Exception:
-            self._collection = self.client.create_collection(
+            self.collection = self.client.create_collection(
                 name=collection_name,
                 metadata={"hnsw:space": self.metric},
                 embedding_function=None,
             )
             self.logger.message(f"ChromaDB collection '{collection_name}' created.")
-        return self._collection
+        return self.collection
 
     def drop_collection(self, collection_name: str) -> bool:
         """Drop the specified collection.

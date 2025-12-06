@@ -6,37 +6,43 @@ Thank you for your interest in contributing to CrossVector!
 
 ### Prerequisites
 
-- Python 3.9+
+- Python 3.11+
 - Git
-- Poetry (optional, for dependency management)
+- [uv](https://docs.astral.sh/uv/) (recommended for fast package management)
 
 ### Development Setup
 
 1. **Clone the repository:**
 
 ```bash
-git clone https://github.com/yourusername/crossvector.git
+git clone https://github.com/thewebscraping/crossvector.git
 cd crossvector
 ```
 
-1. **Create virtual environment:**
+2. **Install dependencies with uv:**
 
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Install uv if you haven't already
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install project with all dependencies (dev + all backends/embeddings)
+uv pip install -e ".[dev,all]"
+
+# Or install specific extras
+uv pip install -e ".[dev,pgvector,openai]"  # Just PgVector + OpenAI
 ```
 
-1. **Install dependencies:**
+3. **Setup pre-commit hooks:**
 
 ```bash
-# With pip
-pip install -e ".[dev,all]"
+# Install pre-commit hooks
+pre-commit install
 
-# With Poetry
-poetry install --with dev --all-extras
+# (Optional) Run on all files to test
+pre-commit run --all-files
 ```
 
-1. **Configure environment:**
+4. **Configure environment:**
 
 ```bash
 cp .env.example .env
@@ -51,22 +57,35 @@ cp .env.example .env
 
 CrossVector follows PEP 8 and uses:
 
-- **Black** for code formatting
-- **isort** for import sorting
-- **flake8** for linting
-- **mypy** for type checking
+- **[Ruff](https://docs.astral.sh/ruff/)** for fast linting and formatting (replaces Black, isort, flake8)
+- **pre-commit** for automated code quality checks
+- **mypy** for type checking (optional, can be enabled in `.pre-commit-config.yaml`)
 
-**Format code:**
+**Automatic formatting with pre-commit:**
+
+Pre-commit hooks will automatically run on every commit. To manually run:
 
 ```bash
-black src/ tests/
-isort src/ tests/
+# Run all hooks on staged files
+pre-commit run
+
+# Run all hooks on all files
+pre-commit run --all-files
+
+# Run specific hook
+pre-commit run ruff --all-files
 ```
 
-**Lint code:**
+**Manual formatting and linting:**
 
 ```bash
-flake8 src/ tests/
+# Format code with ruff
+ruff format src/ tests/ scripts/
+
+# Lint and auto-fix issues
+ruff check src/ tests/ scripts/ --fix
+
+# Type checking (optional)
 mypy src/
 ```
 
@@ -110,15 +129,41 @@ pytest tests/test_engine.py
 pytest --cov=crossvector --cov-report=html
 ```
 
-**Backend integration tests:**
+**Integration tests with real backends:**
 
 ```bash
-# Run all backend tests
-python scripts/backend.py
+# Run all integration tests
+pytest scripts/tests/ -v
 
 # Specific backend
-python scripts/backend.py --backend pgvector
+pytest scripts/tests/test_pgvector.py -v
 ```
+
+## Benchmarking
+
+Before submitting performance-related changes, run benchmarks to measure impact:
+
+```bash
+# Quick benchmark (10 docs)
+python scripts/benchmark.py --num-docs 10
+
+# Full benchmark (1000 docs) - before and after your changes
+python scripts/benchmark.py --output benchmark_before.md
+# ... make your changes ...
+python scripts/benchmark.py --output benchmark_after.md
+
+# Compare specific backend
+python scripts/benchmark.py --backends pgvector --num-docs 100
+```
+
+The benchmark tool tests:
+- Bulk and individual create operations
+- Vector search performance
+- Metadata-only search
+- Query DSL operators (10 operators)
+- Update and delete operations
+
+Results are saved as markdown reports for easy comparison. See [Benchmarking Guide](benchmarking.md) for details.
 
 ### Writing Tests
 
@@ -394,15 +439,18 @@ mkdocs build  # Build static site
 
 ```bash
 pytest
-python scripts/backend.py
+pytest scripts/tests/ -v  # Integration tests with real backends
 ```
 
-1. **Format code:**
+2. **Format and lint code:**
 
 ```bash
-black src/ tests/
-isort src/ tests/
-flake8 src/ tests/
+# Let pre-commit handle it automatically
+pre-commit run --all-files
+
+# Or manually
+ruff format src/ tests/ scripts/
+ruff check src/ tests/ scripts/ --fix
 ```
 
 1. **Update documentation:**

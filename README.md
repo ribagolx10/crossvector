@@ -36,12 +36,14 @@ CrossVector provides a consistent, high-level API across multiple vector databas
 - **4 Vector Databases**: AstraDB, ChromaDB, Milvus, PgVector
 - **2 Embedding Providers**: OpenAI, Gemini
 - Switch backends without code changes
+- Lazy initialization pattern for optimal resource usage
 
 ### 🎯 Unified API
 
 - Consistent interface across all adapters
 - Django-style `get`, `get_or_create`, `update_or_create` semantics
 - Flexible document input formats: `str`, `dict`, or `VectorDocument`
+- Standardized error handling with contextual exceptions
 
 ### 🔍 Advanced Querying
 
@@ -55,18 +57,21 @@ CrossVector provides a consistent, high-level API across multiple vector databas
 - Automatic batch embedding generation
 - Bulk operations: `bulk_create`, `bulk_update`, `upsert`
 - Configurable batch sizes and conflict resolution
+- Lazy client initialization for faster startup
 
 ### 🛡️ Type-Safe & Validated
 
-- Full Pydantic validation
+- Full Pydantic v2 validation
 - Structured exceptions with detailed context
 - Centralized logging with configurable levels
+- Explicit configuration validation with helpful error messages
 
 ### ⚙️ Flexible Configuration
 
 - Environment variable support via `.env`
 - Multiple primary key strategies: UUID, hash-based, int64, custom
 - Optional text storage to optimize space
+- Strict config validation prevents silent failures
 
 ---
 
@@ -118,9 +123,9 @@ from crossvector import VectorEngine
 from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
 from crossvector.dbs.pgvector import PgVectorAdapter
 
-# Initialize engine
+# Initialize engine (uses default models if not specified)
 engine = VectorEngine(
-    embedding=OpenAIEmbeddingAdapter(model_name="text-embedding-3-small"),
+    embedding=OpenAIEmbeddingAdapter(),  # Uses text-embedding-3-small by default
     db=PgVectorAdapter(),
     collection_name="my_documents",
     store_text=True
@@ -359,7 +364,10 @@ Create a `.env` file in your project root:
 OPENAI_API_KEY=sk-...
 
 # Gemini
-GOOGLE_API_KEY=AI...
+GEMINI_API_KEY=AI...
+
+# Optional: Override default embedding model (each adapter has its own default)
+# VECTOR_EMBEDDING_MODEL=gemini-embedding-001
 
 # AstraDB
 ASTRA_DB_APPLICATION_TOKEN=AstraCS:...
@@ -371,9 +379,15 @@ CHROMA_API_KEY=...
 CHROMA_TENANT=...
 CHROMA_DATABASE=...
 
-# ChromaDB (Self-hosted)
+# ChromaDB (Self-hosted HTTP)
 CHROMA_HOST=localhost
 CHROMA_PORT=8000
+
+# ChromaDB (Local persistence)
+CHROMA_PERSIST_DIR=./chroma_data
+
+# Note: Cannot set both CHROMA_HOST and CHROMA_PERSIST_DIR
+# Choose one based on deployment mode
 
 # Milvus
 MILVUS_API_ENDPOINT=https://...
@@ -382,7 +396,7 @@ MILVUS_API_KEY=...
 # PgVector
 PGVECTOR_HOST=localhost
 PGVECTOR_PORT=5432
-PGVECTOR_DBNAME=vector_db
+VECTOR_COLLECTION_NAME=vector_db
 PGVECTOR_USER=postgres
 PGVECTOR_PASSWORD=postgres
 
@@ -458,21 +472,26 @@ engine = VectorEngine(embedding=embedding, db=db)
 ```python
 from crossvector.dbs.chroma import ChromaAdapter
 
-# Cloud mode
-db = ChromaAdapter()  # Uses CHROMA_API_KEY from env
+# Cloud mode (requires CHROMA_API_KEY)
+db = ChromaAdapter()
 
-# Self-hosted mode
-db = ChromaAdapter()  # Uses CHROMA_HOST/PORT from env
+# Self-hosted HTTP mode (requires CHROMA_HOST, must not set CHROMA_PERSIST_DIR)
+db = ChromaAdapter()
 
-# Local persistence mode
-db = ChromaAdapter()  # Uses CHROMA_PERSIST_DIR from env
+# Local persistence mode (requires CHROMA_PERSIST_DIR, must not set CHROMA_HOST)
+db = ChromaAdapter()
 
 engine = VectorEngine(embedding=embedding, db=db)
 
 # Features:
 # - Multiple deployment modes (cloud/HTTP/local)
-# - Automatic client fallback
+# - Strict config validation (prevents conflicting settings)
+# - Explicit import pattern for better code clarity
 # - Flattened metadata with dot-notation support
+# - Lazy client initialization
+
+# Important: Cannot set both CHROMA_HOST and CHROMA_PERSIST_DIR
+# Choose one deployment mode explicitly to avoid errors
 ```
 
 ### Milvus
@@ -519,32 +538,44 @@ from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
 # Default model (text-embedding-3-small, 1536 dims)
 embedding = OpenAIEmbeddingAdapter()
 
-# Larger model (text-embedding-3-large, 3072 dims)
-embedding = OpenAIEmbeddingAdapter(model_name="text-embedding-3-large")
+# Or use VECTOR_EMBEDDING_MODEL from .env
+# VECTOR_EMBEDDING_MODEL=text-embedding-3-large
+embedding = OpenAIEmbeddingAdapter()  # Uses env var
 
-# Legacy model (text-embedding-ada-002, 1536 dims)
-embedding = OpenAIEmbeddingAdapter(model_name="text-embedding-ada-002")
+# Explicit model override
+embedding = OpenAIEmbeddingAdapter(model_name="text-embedding-3-large")
 ```
+
+**Supported Models:**
+- `text-embedding-3-small` (1536 dims, default)
+- `text-embedding-3-large` (3072 dims)
+- `text-embedding-ada-002` (1536 dims, legacy)
 
 ### Gemini
 
 ```python
 from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
 
-# Default model (gemini-embedding-001)
+# Default model (gemini-embedding-001, 1536 dims)
 embedding = GeminiEmbeddingAdapter()
 
+# Or use VECTOR_EMBEDDING_MODEL from .env
+# VECTOR_EMBEDDING_MODEL=gemini-embedding-001
+embedding = GeminiEmbeddingAdapter()  # Uses env var
+
 # With custom dimensions (768, 1536, 3072)
-embedding = GeminiEmbeddingAdapter(
-    model_name="gemini-embedding-001",
-    dim=1536
-)
+embedding = GeminiEmbeddingAdapter(dim=768)
 
 # With task type
 embedding = GeminiEmbeddingAdapter(
     task_type="retrieval_document"  # or "retrieval_query", "semantic_similarity"
 )
 ```
+
+**Supported Models:**
+- `gemini-embedding-001` (768-3072 dims, default, recommended)
+- `text-embedding-005` (768 dims)
+- `text-embedding-004` (768 dims, legacy)
 
 ---
 
@@ -658,7 +689,7 @@ export MILVUS_API_TOKEN=...
 # PgVector
 export PGVECTOR_HOST=localhost
 export PGVECTOR_PORT=5432
-export PGVECTOR_DBNAME=vectordb
+export VECTOR_COLLECTION_NAME=vectordb
 export PGVECTOR_USER=postgres
 export PGVECTOR_PASSWORD=postgres
 ```
@@ -675,12 +706,114 @@ pytest tests/test_engine.py
 # With coverage
 pytest tests/ --cov=crossvector --cov-report=html
 
-# Integration tests (requires real backends)
-python scripts/backend.py --backend pgvector --embedding-provider openai
-python scripts/backend.py --backend astradb --embedding-provider openai
-python scripts/backend.py --backend milvus --embedding-provider openai
-python scripts/backend.py --backend chroma --embedding-provider openai
+# Integration tests with real backends (requires credentials)
+pytest scripts/tests/test_pgvector.py -v
+pytest scripts/tests/test_astradb.py -v
+pytest scripts/tests/test_milvus.py -v
+pytest scripts/tests/test_chroma.py -v
 ```
+
+---
+
+## Benchmarking
+
+CrossVector includes a comprehensive benchmarking tool to compare performance across different database backends and embedding providers.
+
+### Quick Start
+
+```bash
+# Quick test with 10 documents (recommended first run)
+python scripts/benchmark.py --num-docs 10
+
+# Full benchmark with 1000 documents
+python scripts/benchmark.py
+
+# Test specific backends and embeddings
+python scripts/benchmark.py --backends pgvector milvus --embedding-providers openai
+
+# Custom output file
+python scripts/benchmark.py --output results/my_benchmark.md
+```
+
+### What Gets Benchmarked
+
+The benchmark tool measures performance across 7 key operations:
+
+1. **Bulk Create** - Batch insertion with automatic embedding generation
+2. **Individual Create** - Single document creation performance
+3. **Vector Search** - Semantic similarity search with embeddings
+4. **Metadata-Only Search** - Filtering without vector similarity
+5. **Query DSL Operators** - Testing all 10 operators (eq, ne, gt, gte, lt, lte, in, nin, and, or)
+6. **Update Operations** - Document update performance
+7. **Delete Operations** - Batch deletion throughput
+
+### Supported Backends
+
+- **PgVector** - PostgreSQL with vector extension
+- **AstraDB** - DataStax Astra vector database
+- **Milvus** - Open-source vector database
+- **ChromaDB** - Embedded vector database
+
+### Supported Embeddings
+
+- **OpenAI** - `text-embedding-3-small` (1536 dimensions)
+- **Gemini** - `text-embedding-004` (768 dimensions)
+
+### Sample Results
+
+```markdown
+| Backend  | Embedding | Bulk Create | Search (avg) | Update (avg) | Delete (batch) |
+|----------|-----------|-------------|--------------|--------------|----------------|
+| pgvector | openai    | 1.37s       | 434ms        | 6.20ms       | 0.54ms         |
+| pgvector | gemini    | 3.64s       | 321ms        | 3.16ms       | 0.47ms         |
+| milvus   | openai    | 0.95s       | 156ms        | 4.12ms       | 0.31ms         |
+| chroma   | gemini    | 2.14s       | 287ms        | 5.43ms       | 0.89ms         |
+```
+
+### Requirements
+
+**Environment Variables:**
+
+```bash
+# Embedding providers (at least one required)
+OPENAI_API_KEY=sk-...
+GOOGLE_API_KEY=...
+
+# Database backends (optional, script will skip if not configured)
+PGVECTOR_CONNECTION_STRING=postgresql://...
+ASTRADB_API_ENDPOINT=https://...
+ASTRADB_APPLICATION_TOKEN=AstraCS:...
+MILVUS_API_ENDPOINT=https://...
+MILVUS_API_TOKEN=...
+```
+
+### Recommended Workflow
+
+```bash
+# Step 1: Quick verification (1-2 minutes)
+python scripts/benchmark.py --num-docs 1 --backends pgvector --embedding-providers openai
+
+# Step 2: Fast comparison with 10 docs (5-10 minutes)
+python scripts/benchmark.py --num-docs 10
+
+# Step 3: Production benchmark with 1000 docs (30-60 minutes)
+python scripts/benchmark.py --num-docs 1000 --output benchmark_full.md
+```
+
+### Output
+
+Results are saved to `benchmark.md` (or custom path) with:
+- Performance summary table comparing all combinations
+- Detailed metrics for each backend + embedding pair
+- Query DSL operator test results
+- Timestamps and configuration details
+
+**Example output:**
+```
+📄 Markdown report saved to: benchmark.md
+```
+
+See [benchmarking documentation](docs/benchmarking.md) for more details.
 
 ---
 

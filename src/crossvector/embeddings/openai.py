@@ -23,22 +23,24 @@ class OpenAIEmbeddingAdapter(EmbeddingAdapter):
 
     def __init__(
         self,
-        model_name: str = settings.OPENAI_EMBEDDING_MODEL,
+        model_name: Optional[str] = None,
         dim: Optional[int] = None,
     ):
-        super().__init__(model_name)
-        self._client: OpenAI | None = None
-        # Only accept known OpenAI models; unknown should raise
-        if model_name in self._DIMENSIONS:
-            self._embedding_dimension = self._DIMENSIONS[model_name]
-        else:
+        # Determine model: explicit > VECTOR_EMBEDDING_MODEL > default
+        model_name = model_name or settings.VECTOR_EMBEDDING_MODEL or "text-embedding-3-small"
+        # Validate model and get its default dimension
+        if model_name not in self._DIMENSIONS:
             raise InvalidFieldError(
                 "Unknown embedding dimension",
                 field="model_name",
                 value=model_name,
                 expected=list(self._DIMENSIONS.keys()),
             )
-        self.logger.message(f"OpenAIEmbeddingAdapter initialized with model '{model_name}'.")
+        # Use model's default dimension if dim not provided
+        model_dim = dim or self._DIMENSIONS[model_name]
+        super().__init__(model_name=model_name, dim=model_dim)
+        self._client: OpenAI | None = None
+        self.logger.message(f"OpenAIEmbeddingAdapter initialized with model '{model_name}', dim={self._dim}.")
 
     @property
     def client(self) -> OpenAI:
@@ -54,11 +56,6 @@ class OpenAIEmbeddingAdapter(EmbeddingAdapter):
                 )
             self._client = OpenAI(api_key=settings.OPENAI_API_KEY)
         return self._client
-
-    @property
-    def embedding_dimension(self) -> int:
-        assert self._embedding_dimension is not None
-        return self._embedding_dimension
 
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:
         """

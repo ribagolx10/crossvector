@@ -23,8 +23,8 @@ def chroma_engine():
         embedding = OpenAIEmbeddingAdapter(model_name="text-embedding-3-small")
         db = ChromaAdapter()
         engine = VectorEngine(
-            embedding=embedding,
             db=db,
+            embedding=embedding,
             collection_name="test_crossvector",
             store_text=True,
         )
@@ -37,8 +37,8 @@ def chroma_engine():
 
         # Reinitialize
         engine = VectorEngine(
-            embedding=embedding,
             db=db,
+            embedding=embedding,
             collection_name="test_crossvector",
             store_text=True,
         )

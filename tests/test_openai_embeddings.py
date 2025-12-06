@@ -16,7 +16,7 @@ class TestOpenAIEmbeddingAdapter:
         adapter = OpenAIEmbeddingAdapter(model_name="text-embedding-3-small")
 
         assert adapter.model_name == "text-embedding-3-small"
-        assert adapter.embedding_dimension == 1536
+        assert adapter.dim == 1536
 
     def test_initialization_invalid_model(self):
         """Test adapter initialization with unknown model."""
@@ -33,7 +33,7 @@ class TestOpenAIEmbeddingAdapter:
 
         for model_name, expected_dim in models.items():
             adapter = OpenAIEmbeddingAdapter(model_name=model_name)
-            assert adapter.embedding_dimension == expected_dim
+            assert adapter.dim == expected_dim
 
     @patch("crossvector.embeddings.openai.OpenAI")
     @patch("crossvector.embeddings.openai.settings")

@@ -10,7 +10,7 @@ This guide will get you up and running with CrossVector in minutes.
 pip install crossvector[pgvector,openai]
 ```
 
-1. Set up environment variables (create a `.env` file):
+2. Set up environment variables (create a `.env` file):
 
 ```bash
 OPENAI_API_KEY=sk-...
@@ -20,6 +20,8 @@ PGVECTOR_DBNAME=vector_db
 PGVECTOR_USER=postgres
 PGVECTOR_PASSWORD=postgres
 ```
+
+**Note:** CrossVector uses strict configuration validation. Missing or conflicting settings will raise `MissingConfigError` with helpful hints about what to fix.
 
 ## Basic Usage
 
@@ -31,12 +33,16 @@ from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
 from crossvector.dbs.pgvector import PgVectorAdapter
 
 # Create engine instance
+# Adapters use lazy initialization - clients are created only when first used
 engine = VectorEngine(
     embedding=OpenAIEmbeddingAdapter(model_name="text-embedding-3-small"),
     db=PgVectorAdapter(),
     collection_name="my_documents",
     store_text=True  # Store original text
 )
+
+# Note: Database client and collection are initialized lazily on first operation
+# This improves startup time and allows validation to happen at the right moment
 ```
 
 ### Create Documents
@@ -383,9 +389,69 @@ total = engine.count()
 print(f"\nTotal articles: {total}")
 ```
 
+## Backend-Specific Examples
+
+### ChromaDB with Multiple Deployment Modes
+
+```python
+from crossvector.dbs.chroma import ChromaAdapter
+
+# Option 1: Cloud (set CHROMA_API_KEY in .env)
+engine = VectorEngine(
+    embedding=OpenAIEmbeddingAdapter(),
+    db=ChromaAdapter(),
+    collection_name="cloud_docs"
+)
+
+# Option 2: Self-hosted HTTP (set CHROMA_HOST in .env, not CHROMA_PERSIST_DIR)
+engine = VectorEngine(
+    embedding=OpenAIEmbeddingAdapter(),
+    db=ChromaAdapter(),
+    collection_name="http_docs"
+)
+
+# Option 3: Local persistence (set CHROMA_PERSIST_DIR in .env, not CHROMA_HOST)
+engine = VectorEngine(
+    embedding=OpenAIEmbeddingAdapter(),
+    db=ChromaAdapter(),
+    collection_name="local_docs"
+)
+
+# Important: Cannot mix CHROMA_HOST and CHROMA_PERSIST_DIR
+# This will raise MissingConfigError with helpful guidance
+```
+
+### Error Handling
+
+```python
+from crossvector.exceptions import (
+    MissingConfigError,
+    DocumentNotFoundError,
+    CollectionNotFoundError
+)
+
+try:
+    # Conflicting ChromaDB config
+    # CHROMA_HOST="localhost" AND CHROMA_PERSIST_DIR="./data"
+    engine = VectorEngine(
+        embedding=OpenAIEmbeddingAdapter(),
+        db=ChromaAdapter(),
+        collection_name="docs"
+    )
+except MissingConfigError as e:
+    print(f"Configuration error: {e}")
+    print(f"Hint: {e.hint}")  # Helpful resolution guidance
+
+try:
+    doc = engine.get(id="nonexistent-id")
+except DocumentNotFoundError as e:
+    print(f"Document not found: {e.document_id}")
+```
+
 ## Next Steps
 
 - [API Reference](api.md) - Complete API documentation
 - [Query DSL](querydsl.md) - Advanced filtering and queries
 - [Configuration](configuration.md) - Environment variables and settings
 - [Database Adapters](adapters/databases.md) - Backend-specific features
+- [Architecture](architecture.md) - System design and error handling

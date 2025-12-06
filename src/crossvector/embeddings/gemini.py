@@ -19,13 +19,13 @@ class GeminiEmbeddingAdapter(EmbeddingAdapter):
         "text-embedding-005": 768,
         "text-multilingual-embedding-002": 768,
         "embedding-001": 768,
-        "gemini-embedding-001": 768,  # Default optimized to 768, supports up to 3072
+        "gemini-embedding-001": 1536,  # Default optimized to 1536, supports up to 3072
         # Full model names
         "models/text-embedding-004": 768,
         "models/text-embedding-005": 768,
         "models/text-multilingual-embedding-002": 768,
         "models/embedding-001": 768,
-        "models/gemini-embedding-001": 768,
+        "models/gemini-embedding-001": 1536,
     }
 
     # Valid output dimensions for gemini-embedding-001
@@ -33,10 +33,10 @@ class GeminiEmbeddingAdapter(EmbeddingAdapter):
 
     def __init__(
         self,
-        model_name: str = api_settings.GEMINI_EMBEDDING_MODEL,
+        model_name: Optional[str] = None,
         api_key: Optional[str] = None,
         task_type: str = "retrieval_document",
-        dim: Optional[int] = api_settings.VECTOR_DIM,
+        dim: Optional[int] = None,
     ):
         """
         Initialize Gemini embedding adapter.
@@ -62,21 +62,19 @@ class GeminiEmbeddingAdapter(EmbeddingAdapter):
                 - None: Use default (768 for most models)
                 - 768, 1536, or 3072: Supported by gemini-embedding-001
         """
-        super().__init__(model_name)
-        self._client = None
-        # Prefer settings; allow explicit api_key override
-        self._api_key = api_key or api_settings.GOOGLE_API_KEY or api_settings.GEMINI_API_KEY
-        self.task_type = task_type
-        self.dim = dim
+        # Determine model: explicit > VECTOR_EMBEDDING_MODEL > default
+        model_name = model_name or api_settings.VECTOR_EMBEDDING_MODEL or "gemini-embedding-001"
 
         # Normalize model name
-        if not model_name.startswith("models/"):
-            self.model_name = f"models/{model_name}"
+        normalized_model = model_name
+        if not normalized_model.startswith("models/"):
+            normalized_model = f"models/{normalized_model}"
 
         # Determine embedding dimension
+        resolved_dim = dim
         if dim is not None:
             # User specified dimension
-            if "gemini-embedding-001" in self.model_name:
+            if "gemini-embedding-001" in normalized_model:
                 if dim not in self._VALID_DIMENSIONS_GEMINI_001:
                     raise InvalidFieldError(
                         "Invalid dim for gemini-embedding-001",
@@ -84,22 +82,30 @@ class GeminiEmbeddingAdapter(EmbeddingAdapter):
                         value=dim,
                         expected=self._VALID_DIMENSIONS_GEMINI_001,
                     )
-                self._embedding_dimension = dim
             else:
                 # Other models don't support dynamic dimensionality
-                self.logger.warning(f"dim is only supported for gemini-embedding-001. Ignoring for {self.model_name}")
-                self._embedding_dimension = self._DEFAULT_DIMENSIONS.get(
-                    self.model_name, self._DEFAULT_DIMENSIONS.get(model_name, dim)
+                import logging
+
+                logging.warning(f"dim is only supported for gemini-embedding-001. Using default for {normalized_model}")
+                resolved_dim = self._DEFAULT_DIMENSIONS.get(
+                    normalized_model, self._DEFAULT_DIMENSIONS.get(model_name, 1536)
                 )
         else:
             # Use default dimension
-            self._embedding_dimension = self._DEFAULT_DIMENSIONS.get(
-                self.model_name, self._DEFAULT_DIMENSIONS.get(model_name, dim or 768)
+            resolved_dim = self._DEFAULT_DIMENSIONS.get(
+                normalized_model, self._DEFAULT_DIMENSIONS.get(model_name, 1536)
             )
 
+        # Initialize parent with resolved dim
+        super().__init__(model_name=model_name, dim=resolved_dim)
+
+        self._client = None
+        self._api_key = api_key or api_settings.GEMINI_API_KEY
+        self.task_type = task_type
+        self.model_name = normalized_model
+
         self.logger.message(
-            f"GeminiEmbeddingAdapter initialized: model={self.model_name}, "
-            f"dimension={self._embedding_dimension}, task_type={self.task_type}"
+            f"GeminiEmbeddingAdapter initialized: model={self.model_name}, dim={self._dim}, task_type={self.task_type}"
         )
 
     @property
@@ -111,7 +117,7 @@ class GeminiEmbeddingAdapter(EmbeddingAdapter):
             if not self._api_key:
                 raise MissingConfigError(
                     "API key not configured",
-                    config_key="GOOGLE_API_KEY or GEMINI_API_KEY",
+                    config_key="GEMINI_API_KEY",
                 )
             try:
                 from google import genai
@@ -125,10 +131,6 @@ class GeminiEmbeddingAdapter(EmbeddingAdapter):
                     suggestion="pip install google-genai",
                 )
         return self._client
-
-    @property
-    def embedding_dimension(self) -> int:
-        return self._embedding_dimension
 
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:
         """

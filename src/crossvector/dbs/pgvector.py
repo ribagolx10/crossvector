@@ -55,28 +55,17 @@ class PgVectorAdapter(VectorDBAdapter):
 
     Attributes:
         collection_name: Name of the active collection (table)
-        embedding_dimension: Dimension of vector embeddings
+        dim: Dimension of vector embeddings
         store_text: Whether to store original text with vectors
     """
 
+    _cursor: Any = None
     use_dollar_vector: bool = False
     where_compiler: PgVectorWhereCompiler = pgvector_where
     supports_metadata_only: bool = True  # PGVector supports JSONB filtering without vector
 
-    def __init__(self, **kwargs: Any):
-        """Initialize the PGVector adapter with lazy connection setup.
-
-        Args:
-            **kwargs: Additional configuration options (currently unused)
-        """
-        super(PgVectorAdapter, self).__init__(**kwargs)
-        self._conn = None
-        self._cursor = None
-        self.collection_name: str | None = None
-        self.embedding_dimension: int | None = None
-
     @property
-    def conn(self) -> Any:
+    def client(self) -> Any:
         """Lazily initialize and return the PostgreSQL connection.
 
         Returns:
@@ -85,22 +74,22 @@ class PgVectorAdapter(VectorDBAdapter):
         Raises:
             psycopg2.Error: If connection fails
         """
-        if self._conn is None:
-            # Require explicit PGVECTOR_DBNAME; avoid falling back to system 'postgres'
-            target_db = api_settings.PGVECTOR_DBNAME
+        if self._client is None:
+            # Require explicit VECTOR_COLLECTION_NAME; avoid falling back to system 'postgres'
+            target_db = api_settings.VECTOR_COLLECTION_NAME
             if not target_db:
                 raise MissingConfigError(
-                    "PGVECTOR_DBNAME is not set. Set it via environment variable or .env file (e.g. PGVECTOR_DBNAME=vector_db). Refusing to use system 'postgres' database to avoid accidental writes.",
-                    config_key="PGVECTOR_DBNAME",
+                    "VECTOR_COLLECTION_NAME is not set. Set it via environment variable or .env file (e.g. VECTOR_COLLECTION_NAME=vector_db). Refusing to use system 'postgres' database to avoid accidental writes.",
+                    config_key="VECTOR_COLLECTION_NAME",
                     adapter="PGVector",
-                    hint="Add PGVECTOR_DBNAME to your .env then reinitialize the engine.",
+                    hint="Add VECTOR_COLLECTION_NAME to your .env then reinitialize the engine.",
                 )
             user = api_settings.PGVECTOR_USER or "postgres"
             password = api_settings.PGVECTOR_PASSWORD or "postgres"
             host = api_settings.PGVECTOR_HOST or "localhost"
             port = api_settings.PGVECTOR_PORT or "5432"
             try:
-                self._conn = psycopg2.connect(
+                self._client = psycopg2.connect(
                     dbname=target_db,
                     user=user,
                     password=password,
@@ -130,7 +119,7 @@ class PgVectorAdapter(VectorDBAdapter):
                             cur.close()
                             admin_conn.close()
                         # Re-attempt connection to newly created database
-                        self._conn = psycopg2.connect(
+                        self._client = psycopg2.connect(
                             dbname=target_db,
                             user=user,
                             password=password,
@@ -161,7 +150,7 @@ class PgVectorAdapter(VectorDBAdapter):
                         user=user,
                         original_error=msg,
                     ) from e
-        return self._conn
+        return self._client
 
     @property
     def cursor(self) -> Any:
@@ -171,7 +160,7 @@ class PgVectorAdapter(VectorDBAdapter):
             Active psycopg2 RealDictCursor instance
         """
         if self._cursor is None:
-            self._cursor = self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            self._cursor = self.client.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         return self._cursor
 
     # ------------------------------------------------------------------
@@ -181,7 +170,7 @@ class PgVectorAdapter(VectorDBAdapter):
     def initialize(
         self,
         collection_name: str,
-        embedding_dimension: int,
+        dim: int,
         metric: str = VectorMetric.COSINE,
         store_text: bool | None = None,
         **kwargs: Any,
@@ -190,25 +179,25 @@ class PgVectorAdapter(VectorDBAdapter):
 
         Args:
             collection_name: Name of the collection (table) to use/create
-            embedding_dimension: Dimension of the vector embeddings
+            dim: Dimension of the vector embeddings
             metric: Distance metric ('cosine', 'euclidean', 'dot_product')
             store_text: Whether to store original text content
             **kwargs: Additional configuration options
         """
         self.store_text = store_text if store_text is not None else api_settings.VECTOR_STORE_TEXT
         # Use get_or_create_collection to ensure table exists with proper schema
-        self.get_or_create_collection(collection_name, embedding_dimension, metric)
+        self.get_or_create_collection(collection_name, dim, metric)
         self.logger.message(
             f"PGVector initialized: collection='{collection_name}', "
-            f"dimension={embedding_dimension}, metric={metric}, store_text={self.store_text}"
+            f"dimension={dim}, metric={metric}, store_text={self.store_text}"
         )
 
-    def add_collection(self, collection_name: str, embedding_dimension: int, metric: str = VectorMetric.COSINE) -> str:
+    def add_collection(self, collection_name: str, dim: int, metric: str = VectorMetric.COSINE) -> str:
         """Create a new pgvector table.
 
         Args:
             collection_name: Name of the table to create
-            embedding_dimension: Vector embedding dimension
+            dim: Vector embedding dimension
             metric: Distance metric for vector search
 
         Returns:
@@ -231,7 +220,7 @@ class PgVectorAdapter(VectorDBAdapter):
             raise CollectionExistsError("Collection already exists", collection_name=collection_name)
 
         self.collection_name = collection_name
-        self.embedding_dimension = embedding_dimension
+        self.dim = dim
         if not hasattr(self, "store_text"):
             self.store_text = True
 
@@ -241,22 +230,22 @@ class PgVectorAdapter(VectorDBAdapter):
         # Ensure pgvector extension installed
         try:
             self.cursor.execute("CREATE EXTENSION IF NOT EXISTS vector")
-            self.conn.commit()
+            self.client.commit()
             self.logger.message("pgvector extension ensured (CREATE EXTENSION IF NOT EXISTS vector).")
         except Exception:
-            self.conn.rollback()
+            self.client.rollback()
             raise
 
         create_table_sql = f"""
         CREATE TABLE {collection_name} (
             id {pk_type} PRIMARY KEY,
-            vector vector({embedding_dimension}),
+            vector vector({dim}),
             text TEXT,
             metadata JSONB
         );
         """
         self.cursor.execute(create_table_sql)
-        self.conn.commit()
+        self.client.commit()
         self.logger.message(f"PGVector table '{collection_name}' created. Store text: {self.store_text}")
         return collection_name
 
@@ -289,9 +278,7 @@ class PgVectorAdapter(VectorDBAdapter):
         self.logger.message(f"PGVector table '{collection_name}' retrieved.")
         return collection_name
 
-    def get_or_create_collection(
-        self, collection_name: str, embedding_dimension: int, metric: str = VectorMetric.COSINE
-    ) -> str:
+    def get_or_create_collection(self, collection_name: str, dim: int, metric: str = VectorMetric.COSINE) -> str:
         """Get or create the underlying pgvector table.
 
         Ensures the table exists with proper vector configuration and PK type.
@@ -299,14 +286,14 @@ class PgVectorAdapter(VectorDBAdapter):
 
         Args:
             collection_name: Name of the table
-            embedding_dimension: Vector embedding dimension
+            dim: Vector embedding dimension
             metric: Distance metric for vector search
 
         Returns:
             Collection name (table name)
         """
         self.collection_name = collection_name
-        self.embedding_dimension = embedding_dimension
+        self.dim = dim
         if not hasattr(self, "store_text"):
             self.store_text = True
 
@@ -334,27 +321,27 @@ class PgVectorAdapter(VectorDBAdapter):
                     f"PK type mismatch detected; recreating table '{collection_name}' with desired PK type."
                 )
                 self.cursor.execute(f"DROP TABLE IF EXISTS {collection_name}")
-                self.conn.commit()
+                self.client.commit()
 
         # Ensure pgvector extension installed before creating table
         try:
             self.cursor.execute("CREATE EXTENSION IF NOT EXISTS vector")
-            self.conn.commit()
+            self.client.commit()
             self.logger.message("pgvector extension ensured (CREATE EXTENSION IF NOT EXISTS vector).")
         except Exception:
-            self.conn.rollback()
+            self.client.rollback()
             raise
 
         create_table_sql = f"""
         CREATE TABLE IF NOT EXISTS {collection_name} (
             id {pk_type} PRIMARY KEY,
-            vector vector({embedding_dimension}),
+            vector vector({dim}),
             text TEXT,
             metadata JSONB
         );
         """
         self.cursor.execute(create_table_sql)
-        self.conn.commit()
+        self.client.commit()
         self.logger.message(f"PGVector table '{collection_name}' initialized. Store text: {self.store_text}")
         return collection_name
 
@@ -369,7 +356,7 @@ class PgVectorAdapter(VectorDBAdapter):
         """
         sql = f"DROP TABLE IF EXISTS {collection_name}"
         self.cursor.execute(sql)
-        self.conn.commit()
+        self.client.commit()
         self.logger.message(f"PGVector collection '{collection_name}' dropped.")
         return True
 
@@ -393,7 +380,7 @@ class PgVectorAdapter(VectorDBAdapter):
 
         sql = f"TRUNCATE TABLE {self.collection_name}"
         self.cursor.execute(sql)
-        self.conn.commit()
+        self.client.commit()
         self.logger.message(f"Cleared {count} documents from collection.")
         return count
 
@@ -472,7 +459,7 @@ class PgVectorAdapter(VectorDBAdapter):
         except Exception as exec_err:
             # Ensure aborted transaction does not poison subsequent operations
             try:
-                self.conn.rollback()
+                self.client.rollback()
             except Exception:
                 pass
             raise exec_err
@@ -619,7 +606,7 @@ class PgVectorAdapter(VectorDBAdapter):
             f"INSERT INTO {self.collection_name} (id, vector, text, metadata) VALUES (%s, %s, %s, %s)",
             (pk, vector, text, json.dumps(metadata)),
         )
-        self.conn.commit()
+        self.client.commit()
         self.logger.message(f"Created document with id '{pk}'.")
         return doc
 
@@ -708,7 +695,7 @@ class PgVectorAdapter(VectorDBAdapter):
         params.append(pk)
         sql = f"UPDATE {self.collection_name} SET {', '.join(updates)} WHERE id = %s"
         self.cursor.execute(sql, tuple(params))
-        self.conn.commit()
+        self.client.commit()
         self.logger.message(f"Updated document with id '{pk}'.")
 
         # Return refreshed document
@@ -726,7 +713,7 @@ class PgVectorAdapter(VectorDBAdapter):
         Raises:
             CollectionNotInitializedError: If collection is not initialized
         """
-        if not self._conn:
+        if not self._client:
             raise CollectionNotInitializedError("Connection is not initialized", operation="delete", adapter="PgVector")
 
         # Convert single ID to list
@@ -745,7 +732,7 @@ class PgVectorAdapter(VectorDBAdapter):
             sql = f"DELETE FROM {self.collection_name} WHERE id = ANY(%s)"
             self.cursor.execute(sql, (pks,))
 
-        self.conn.commit()
+        self.client.commit()
         deleted = self.cursor.rowcount
         self.logger.message(f"Deleted {deleted} document(s).")
         return deleted
@@ -832,7 +819,7 @@ class PgVectorAdapter(VectorDBAdapter):
                 batch,
             )
 
-        self.conn.commit()
+        self.client.commit()
         self.logger.message(f"Bulk created {len(created_docs)} document(s).")
         return created_docs
 
@@ -947,7 +934,7 @@ class PgVectorAdapter(VectorDBAdapter):
         if batch:
             self._flush_upsert_batch(batch)
 
-        self.conn.commit()
+        self.client.commit()
         self.logger.message(f"Upserted {len(upserted)} document(s).")
         return upserted
 

@@ -10,17 +10,16 @@ class CrossVectorSettings(BaseSettings):
 
     # OpenAI
     OPENAI_API_KEY: Optional[str] = None
-    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
 
     # Gemini
-    GOOGLE_API_KEY: Optional[str] = None
     GEMINI_API_KEY: Optional[str] = None
-    GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
+
+    # Embedding Model (shared by all providers, each adapter has its own default)
+    VECTOR_EMBEDDING_MODEL: Optional[str] = None
 
     # AstraDB
     ASTRA_DB_APPLICATION_TOKEN: Optional[str] = None
     ASTRA_DB_API_ENDPOINT: Optional[str] = None
-    ASTRA_DB_COLLECTION_NAME: str = "vector_documents"
 
     # Milvus
     MILVUS_API_ENDPOINT: Optional[str] = "http://localhost:19530"
@@ -29,7 +28,6 @@ class CrossVectorSettings(BaseSettings):
     # PGVector
     PGVECTOR_HOST: str = "localhost"
     PGVECTOR_PORT: str = "5432"
-    PGVECTOR_DBNAME: str = "vector_db"
     PGVECTOR_USER: str = "postgres"
     PGVECTOR_PASSWORD: str = "postgres"
 
@@ -42,6 +40,7 @@ class CrossVectorSettings(BaseSettings):
     CHROMA_PERSIST_DIR: Optional[str] = None
 
     # Vector settings
+    VECTOR_COLLECTION_NAME: str = "vector_db"
     VECTOR_METRIC: str = "cosine"
     VECTOR_STORE_TEXT: bool = False
     VECTOR_DIM: int = 1536

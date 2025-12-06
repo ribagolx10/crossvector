@@ -8,12 +8,12 @@ CrossVector provides a consistent, high-level API across multiple vector databas
 
 ## Key Features
 
-- **🔌 Pluggable Architecture**: 4 vector databases, 2 embedding providers
-- **🎯 Unified API**: Consistent interface across all adapters
+- **🔌 Pluggable Architecture**: 4 vector databases, 2 embedding providers, lazy initialization
+- **🎯 Unified API**: Consistent interface across all adapters with standardized error handling
 - **🔍 Advanced Querying**: Type-safe Query DSL with Q objects
-- **🚀 Performance**: Automatic batch embedding, bulk operations
-- **🛡️ Type-Safe**: Full Pydantic validation and structured exceptions
-- **⚙️ Flexible Configuration**: Environment variables, multiple PK strategies
+- **🚀 Performance**: Automatic batch embedding, bulk operations, lazy client initialization
+- **🛡️ Type-Safe**: Full Pydantic v2 validation and structured exceptions
+- **⚙️ Flexible Configuration**: Environment variables, explicit config validation, multiple PK strategies
 
 ## Quick Navigation
 
@@ -72,9 +72,11 @@ results = engine.search(
 | Feature | AstraDB | ChromaDB | Milvus | PgVector |
 |---------|---------|----------|--------|----------|
 | Vector Search | ✅ | ✅ | ✅ | ✅ |
-| Metadata-Only Search | ✅ | ✅ | ❌ | ✅ |
+| Metadata-Only Search | ✅ | ✅ | ✅ | ✅ |
 | Nested Metadata | ✅ | ✅* | ❌ | ✅ |
 | Numeric Comparisons | ✅ | ✅ | ✅ | ✅ |
+| Lazy Initialization | ✅ | ✅ | ✅ | ✅ |
+| Config Validation | ✅ | ✅ | ✅ | ✅ |
 
 *ChromaDB supports nested metadata via dot-notation when flattened.
 

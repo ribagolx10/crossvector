@@ -26,7 +26,7 @@ class TestGeminiEmbeddingAdapter:
         with patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}):
             adapter = GeminiEmbeddingAdapter()
             assert adapter.model_name == "models/gemini-embedding-001"
-            assert adapter.embedding_dimension == 1536
+            assert adapter.dim == 1536
             assert adapter.task_type == "retrieval_document"
 
     def test_initialization_custom_model(self):
@@ -34,22 +34,22 @@ class TestGeminiEmbeddingAdapter:
         with patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}):
             adapter = GeminiEmbeddingAdapter(model_name="text-embedding-004")
             assert adapter.model_name == "models/text-embedding-004"
-            assert adapter.embedding_dimension == 768
+            assert adapter.dim == 768
 
     def test_dynamic_dimensionality_valid(self):
         """Test valid dynamic dimensionality for gemini-embedding-001."""
         with patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}):
             # Test 768
             adapter = GeminiEmbeddingAdapter(model_name="gemini-embedding-001", dim=768)
-            assert adapter.embedding_dimension == 768
+            assert adapter.dim == 768
 
             # Test 1536
             adapter = GeminiEmbeddingAdapter(model_name="gemini-embedding-001", dim=1536)
-            assert adapter.embedding_dimension == 1536
+            assert adapter.dim == 1536
 
             # Test 3072
             adapter = GeminiEmbeddingAdapter(model_name="gemini-embedding-001", dim=3072)
-            assert adapter.embedding_dimension == 3072
+            assert adapter.dim == 3072
 
     def test_dynamic_dimensionality_invalid(self):
         """Test invalid dynamic dimensionality raises error."""
@@ -65,7 +65,7 @@ class TestGeminiEmbeddingAdapter:
         with patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}):
             adapter = GeminiEmbeddingAdapter(model_name="text-embedding-004", dim=1536)
             # Should fallback to default 768
-            assert adapter.embedding_dimension == 768
+            assert adapter.dim == 768
 
     def test_get_embeddings(self):
         """Test get_embeddings calls API correctly."""

@@ -100,8 +100,8 @@ class VectorDocument(BaseModel):
             return cls.from_kwargs(**merged)
         # No vector - create with minimal fields
         pk = extract_pk(None, **merged)
-        for _k in ("_id", "id", "pk"):
-            merged.pop(_k, None)
+        for k in ("_id", "id", "pk"):
+            merged.pop(k, None)
         text = merged.pop("text", None)
         metadata = merged.pop("metadata", None) or {}
         for k, v in merged.items():

@@ -12,7 +12,7 @@ The main class for interacting with vector databases.
 VectorEngine(
     db: VectorDBAdapter,
     embedding: EmbeddingAdapter,
-    collection_name: str = "vector_documents",
+    collection_name: str = "vector_db",
     store_text: bool = False
 )
 ```
@@ -717,7 +717,7 @@ except InvalidFieldError as e:
 from crossvector.exceptions import MissingConfigError
 
 try:
-    db = PgVectorAdapter()  # Missing PGVECTOR_DBNAME
+    db = PgVectorAdapter()  # Missing VECTOR_COLLECTION_NAME
 except MissingConfigError as e:
     print(f"Config: {e.details['config_key']}")
     print(f"Hint: {e.details['hint']}")
