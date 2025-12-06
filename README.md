@@ -367,49 +367,49 @@ All backends support these universal operators:
 Create a `.env` file in your project root:
 
 ```bash
-# OpenAI
+# OpenAI Embedding Provider
 OPENAI_API_KEY=sk-...
 
-# Gemini
+# Gemini Embedding Provider
 GEMINI_API_KEY=AI...
 
-# Optional: Override default embedding model (each adapter has its own default)
-# VECTOR_EMBEDDING_MODEL=gemini-embedding-001
+# Optional: Override default embedding model (adapter-specific)
+VECTOR_EMBEDDING_MODEL=text-embedding-3-small
 
-# AstraDB
+# AstraDB Backend
 ASTRA_DB_APPLICATION_TOKEN=AstraCS:...
-ASTRA_DB_API_ENDPOINT=https://...
-ASTRA_DB_COLLECTION_NAME=vectors
+ASTRA_DB_API_ENDPOINT=https://...apps.astra.datastax.com
 
-# ChromaDB (Cloud)
-CHROMA_API_KEY=...
+# ChromaDB Cloud Backend
+CHROMA_API_KEY=ck-...
 CHROMA_TENANT=...
-CHROMA_DATABASE=...
+CHROMA_DATABASE=Test
 
-# ChromaDB (Self-hosted HTTP)
+# ChromaDB Self-hosted (HTTP)
 CHROMA_HOST=localhost
 CHROMA_PORT=8000
 
-# ChromaDB (Local persistence)
+# ChromaDB Local (Persistent)
 CHROMA_PERSIST_DIR=./chroma_data
 
 # Note: Cannot set both CHROMA_HOST and CHROMA_PERSIST_DIR
 # Choose one based on deployment mode
 
-# Milvus
+# Milvus Backend
 MILVUS_API_ENDPOINT=https://...
 MILVUS_API_KEY=...
 
-# PgVector
+# PgVector Backend
 PGVECTOR_HOST=localhost
 PGVECTOR_PORT=5432
-VECTOR_COLLECTION_NAME=vector_db
 PGVECTOR_USER=postgres
 PGVECTOR_PASSWORD=postgres
 
-# Vector settings
-VECTOR_STORE_TEXT=true
+# Vector Configuration (applies to all backends)
+VECTOR_COLLECTION_NAME=vector_db
+VECTOR_STORE_TEXT=false
 VECTOR_METRIC=cosine
+VECTOR_DIM=1536
 VECTOR_SEARCH_LIMIT=10
 PRIMARY_KEY_MODE=uuid
 LOG_LEVEL=INFO
