@@ -32,7 +32,7 @@ class TestGeminiEmbeddingAdapter:
     def test_initialization_custom_model(self):
         """Test initialization with specific model."""
         with patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}):
-            adapter = GeminiEmbeddingAdapter(model_name="text-embedding-004")
+            adapter = GeminiEmbeddingAdapter(model_name="text-embedding-004", dim=768)
             assert adapter.model_name == "models/text-embedding-004"
             assert adapter.dim == 768
 
@@ -138,4 +138,6 @@ class TestGeminiEmbeddingAdapter:
                 mock_client.models.embed_content.assert_called_once()
 
                 # Check if config was created with correct params
-                mock_types.EmbedContentConfig.assert_called_with(task_type="retrieval_document", dim=1536)
+                mock_types.EmbedContentConfig.assert_called_with(
+                    task_type="retrieval_document", output_dimensionality=1536
+                )

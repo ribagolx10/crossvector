@@ -36,7 +36,6 @@ from crossvector.exceptions import (
 from crossvector.querydsl.compilers.chroma import ChromaWhereCompiler, chroma_where
 from crossvector.schema import VectorDocument
 from crossvector.settings import settings as api_settings
-from crossvector.types import DocIds
 from crossvector.utils import (
     apply_update_fields,
     extract_pk,
@@ -635,11 +634,11 @@ class ChromaAdapter(VectorDBAdapter):
 
         return VectorDocument.from_kwargs(**doc_data)
 
-    def delete(self, ids: DocIds) -> int:
-        """Delete document(s) by ID.
+    def delete(self, *args) -> int:
+        """Delete documents by ID.
 
         Args:
-            ids: Single document ID or list of IDs to delete
+            *args: One or more document IDs to delete
 
         Returns:
             Number of documents deleted
@@ -650,18 +649,12 @@ class ChromaAdapter(VectorDBAdapter):
         if not self.collection:
             raise CollectionNotInitializedError("Collection is not initialized", operation="delete", adapter="ChromaDB")
 
-        # Convert single ID to list
-        if isinstance(ids, (str, int)):
-            pks = [ids]
-        else:
-            pks = list(ids) if ids else []
-
-        if not pks:
+        if not args:
             return 0
 
-        self.collection.delete(ids=pks)
-        self.logger.message(f"Deleted {len(pks)} document(s).")
-        return len(pks)
+        self.collection.delete(ids=list(args))
+        self.logger.message(f"Deleted {len(args)} documents.")
+        return len(args)
 
     # ------------------------------------------------------------------
     # Batch Operations
@@ -779,7 +772,7 @@ class ChromaAdapter(VectorDBAdapter):
                 documents=to_add_texts if self.store_text else None,
             )
 
-        self.logger.message(f"Bulk created {len(created_docs)} document(s).")
+        self.logger.message(f"Bulk created {len(created_docs)} documents.")
         return created_docs
 
     def bulk_update(
@@ -906,7 +899,7 @@ class ChromaAdapter(VectorDBAdapter):
             updated_docs.append(doc)
 
         if not updated_docs:
-            self.logger.message("Bulk updated 0 document(s).")
+            self.logger.message("Bulk updated 0 documents.")
             return []
 
         # Perform batched updates to reduce round-trips
@@ -930,7 +923,7 @@ class ChromaAdapter(VectorDBAdapter):
                 documents=update_texts if self.store_text else None,
             )
 
-        self.logger.message(f"Bulk updated {len(updated_docs)} document(s). (single fetch, batched writes)")
+        self.logger.message(f"Bulk updated {len(updated_docs)} documents. (single fetch, batched writes)")
         return updated_docs
 
     def upsert(self, docs: List[VectorDocument], batch_size: int = None) -> List[VectorDocument]:
@@ -991,5 +984,5 @@ class ChromaAdapter(VectorDBAdapter):
                 documents=texts if self.store_text else None,
             )
 
-        self.logger.message(f"Upserted {len(docs)} document(s).")
+        self.logger.message(f"Upserted {len(docs)} documents.")
         return docs

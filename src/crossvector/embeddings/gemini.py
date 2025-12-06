@@ -1,6 +1,6 @@
 """Concrete adapter for Google Gemini embedding models."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from crossvector.abc import EmbeddingAdapter
 from crossvector.exceptions import InvalidFieldError, MissingConfigError, SearchError
@@ -25,7 +25,6 @@ class GeminiEmbeddingAdapter(EmbeddingAdapter):
         "models/text-embedding-005": 768,
         "models/text-multilingual-embedding-002": 768,
         "models/embedding-001": 768,
-        "models/gemini-embedding-001": 1536,
     }
 
     # Valid output dimensions for gemini-embedding-001
@@ -151,15 +150,8 @@ class GeminiEmbeddingAdapter(EmbeddingAdapter):
             results = []
             # Process texts individually
             for text in texts:
-                # Build config
-                config_params: Dict[str, Any] = {"task_type": self.task_type}
-
-                # Add dim if specified (only for gemini-embedding-001)
-                if self.dim is not None and "gemini-embedding-001" in self.model_name:
-                    config_params["dim"] = self.dim
-
-                config = types.EmbedContentConfig(**config_params)
-
+                # Build config object to ensure dimensionality is passed explicitly
+                config = types.EmbedContentConfig(task_type=self.task_type, output_dimensionality=self.dim)
                 # Call API
                 result = self.client.models.embed_content(model=self.model_name, contents=text, config=config)
 

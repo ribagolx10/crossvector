@@ -34,7 +34,6 @@ from crossvector.exceptions import (
 from crossvector.querydsl.compilers.milvus import MilvusWhereCompiler, milvus_where
 from crossvector.schema import VectorDocument
 from crossvector.settings import settings as api_settings
-from crossvector.types import DocIds
 from crossvector.utils import (
     apply_update_fields,
     extract_pk,
@@ -624,11 +623,11 @@ class MilvusAdapter(VectorDBAdapter):
         refreshed = self.client.get(collection_name=self.collection_name, ids=[pk])
         return VectorDocument.from_kwargs(**refreshed[0])
 
-    def delete(self, ids: DocIds) -> int:
-        """Delete document(s) by ID.
+    def delete(self, *args) -> int:
+        """Delete documents by ID.
 
         Args:
-            ids: Single document ID or list of IDs to delete
+            *args: One or more document IDs to delete
 
         Returns:
             Number of documents deleted
@@ -639,18 +638,12 @@ class MilvusAdapter(VectorDBAdapter):
         if not self.collection_name:
             raise CollectionNotInitializedError("Collection is not initialized", operation="delete", adapter="Milvus")
 
-        # Convert single ID to list
-        if isinstance(ids, (str, int)):
-            pks = [ids]
-        else:
-            pks = list(ids) if ids else []
-
-        if not pks:
+        if not args:
             return 0
 
-        self.client.delete(collection_name=self.collection_name, ids=pks)
-        self.logger.message(f"Deleted {len(pks)} document(s).")
-        return len(pks)
+        self.client.delete(collection_name=self.collection_name, ids=list(args))
+        self.logger.message(f"Deleted {len(args)} documents.")
+        return len(args)
 
     # ------------------------------------------------------------------
     # Batch Operations
@@ -746,7 +739,7 @@ class MilvusAdapter(VectorDBAdapter):
             else:
                 self.client.upsert(collection_name=self.collection_name, data=dataset)
 
-        self.logger.message(f"Bulk created {len(created_docs)} document(s).")
+        self.logger.message(f"Bulk created {len(created_docs)} documents.")
         return created_docs
 
     def bulk_update(
@@ -850,7 +843,7 @@ class MilvusAdapter(VectorDBAdapter):
         # Load collection to make data queryable
         self.client.load_collection(collection_name=self.collection_name)
 
-        self.logger.message(f"Bulk updated {len(updated_docs)} document(s).")
+        self.logger.message(f"Bulk updated {len(updated_docs)} documents.")
         return updated_docs
 
     def upsert(self, docs: List[VectorDocument], batch_size: int = None) -> List[VectorDocument]:
@@ -900,5 +893,5 @@ class MilvusAdapter(VectorDBAdapter):
         # Load collection to make data queryable
         self.client.load_collection(collection_name=self.collection_name)
 
-        self.logger.message(f"Upserted {len(docs)} document(s).")
+        self.logger.message(f"Upserted {len(docs)} documents.")
         return docs

@@ -4,6 +4,8 @@ Targets real ChromaDB. Configure using TEST_ env vars first,
 with static default collection name.
 """
 
+from uuid import uuid4
+
 import pytest
 from dotenv import load_dotenv
 
@@ -22,24 +24,14 @@ def chroma_engine():
     try:
         embedding = OpenAIEmbeddingAdapter(model_name="text-embedding-3-small")
         db = ChromaAdapter()
+
+        # Use a unique collection name each run to avoid soft-deleted conflicts
+        collection_name = f"test_crossvector_{uuid4().hex[:8]}"
+
         engine = VectorEngine(
             db=db,
             embedding=embedding,
-            collection_name="test_crossvector",
-            store_text=True,
-        )
-
-        # Clean up before tests
-        try:
-            engine.drop_collection("test_crossvector")
-        except Exception:
-            pass
-
-        # Reinitialize
-        engine = VectorEngine(
-            db=db,
-            embedding=embedding,
-            collection_name="test_crossvector",
+            collection_name=collection_name,
             store_text=True,
         )
 
@@ -47,7 +39,7 @@ def chroma_engine():
 
         # Cleanup after tests
         try:
-            engine.drop_collection("test_crossvector")
+            engine.drop_collection(collection_name)
         except Exception:
             pass
 
@@ -227,5 +219,5 @@ class TestChroma:
         assert created2 and uoc.id == "crud-new-1"
 
         # Delete
-        deleted = chroma_engine.delete([doc.id, uoc.id])
+        deleted = chroma_engine.delete(doc.id, uoc.id)
         assert deleted >= 0

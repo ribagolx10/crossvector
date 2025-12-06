@@ -158,11 +158,11 @@ engine.bulk_update(updates)
 ```python
 # Delete single document
 deleted_count = engine.delete(doc1.id)
-print(f"Deleted {deleted_count} document(s)")
+print(f"Deleted {deleted_count} documents")
 
 # Delete multiple documents
-deleted_count = engine.delete([doc2.id, doc3.id])
-print(f"Deleted {deleted_count} document(s)")
+deleted_count = engine.delete(doc2.id, doc3.id)
+print(f"Deleted {deleted_count} documents")
 ```
 
 ### Count Documents

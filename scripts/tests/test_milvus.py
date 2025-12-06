@@ -239,5 +239,5 @@ class TestMilvus:
         assert created2 and uoc.id == "crud-new-1"
 
         # Delete
-        deleted = milvus_engine.delete([doc.id, uoc.id])
+        deleted = milvus_engine.delete(doc.id, uoc.id)
         assert deleted >= 0

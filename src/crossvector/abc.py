@@ -10,7 +10,6 @@ from crossvector.querydsl.compilers.base import BaseWhere
 from crossvector.settings import settings as api_settings
 
 from .schema import VectorDocument
-from .types import DocIds
 
 if TYPE_CHECKING:
     from crossvector.querydsl.q import Q
@@ -326,11 +325,11 @@ class VectorDBAdapter(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def delete(self, ids: DocIds) -> int:
-        """Delete document(s) by primary key.
+    def delete(self, *ids) -> int:
+        """Delete documents by primary key.
 
         Args:
-            ids: Single document pk or list of pks to delete
+            *args: One or more document IDs to delete
 
         Returns:
             Number of documents successfully deleted

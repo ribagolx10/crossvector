@@ -242,7 +242,7 @@ class TestVectorEngineExtended:
         docs = engine.bulk_create(["Text1", "Text2"])
         assert engine.count() == 2
 
-        engine.delete([docs[0].pk])
+        engine.delete(docs[0].pk)
         assert engine.count() == 1
 
     def test_embedding_property(self):

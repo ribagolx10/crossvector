@@ -418,7 +418,7 @@ doc, created = engine.update_or_create(
 
 ### delete()
 
-Delete document(s) by ID.
+Delete documents by ID.
 
 ```python
 delete(ids: str | List[str]) -> int
@@ -437,7 +437,7 @@ delete(ids: str | List[str]) -> int
 deleted = engine.delete("doc-id")
 
 # Delete multiple
-deleted = engine.delete(["doc-1", "doc-2", "doc-3"])
+deleted = engine.delete("doc-1", "doc-2", "doc-3")
 ```
 
 ---

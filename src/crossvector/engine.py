@@ -18,7 +18,7 @@ from .abc import EmbeddingAdapter, VectorDBAdapter
 from .exceptions import CrossVectorError, InvalidFieldError, MismatchError, MissingFieldError
 from .logger import Logger
 from .schema import VectorDocument
-from .types import Doc, DocIds
+from .types import Doc
 from .utils import extract_pk
 
 
@@ -319,21 +319,23 @@ class VectorEngine:
         self.logger.message("Update pk=%s", doc.id)
         return self.db.update(doc, **kwargs)
 
-    def delete(self, ids: DocIds) -> int:
+    def delete(self, *args) -> int:
         """Delete one or more documents by primary key.
 
         Args:
-            ids: Single document ID (str) or sequence of IDs to delete
+            *args: One or more document IDs to delete
 
         Returns:
             Number of documents successfully deleted
 
         Examples:
             >>> engine.delete("doc123")
-            >>> engine.delete(["doc1", "doc2", "doc3"])
+            >>> engine.delete("doc1", "doc2", "doc3")
         """
-        self.logger.message("Delete ids=%s", ids)
-        return self.db.delete(ids)
+        if not args:
+            return 0
+        self.logger.message("Delete ids=%s", args)
+        return self.db.delete(*args)
 
     def count(self) -> int:
         """Count total documents in the collection.

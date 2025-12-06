@@ -312,7 +312,7 @@ class TestVectorEngine:
 
         engine = VectorEngine(embedding=embedding, db=db, collection_name="test_collection")
 
-        deleted_count = engine.delete([])
+        deleted_count = engine.delete()
 
         assert deleted_count == 0
 

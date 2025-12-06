@@ -208,5 +208,5 @@ class TestAstraDB:
         assert created2 and uoc.id == "crud-new-1"
 
         # Delete
-        deleted = astradb_engine.delete([doc.id, uoc.id])
+        deleted = astradb_engine.delete(doc.id, uoc.id)
         assert deleted >= 0

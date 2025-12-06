@@ -191,7 +191,7 @@ class TestPgVector:
         assert found
 
         # Cleanup
-        pgvector_engine.delete(["nested1", "nested2"])
+        pgvector_engine.delete("nested1", "nested2")
 
     def test_range_query(self, pgvector_engine, sample_docs):
         """Test range queries (between values) with numeric casting."""
@@ -270,5 +270,5 @@ class TestPgVector:
         assert created2 and uoc.id == "crud-new-1"
 
         # Delete
-        deleted = pgvector_engine.delete([doc.id, uoc.id])
+        deleted = pgvector_engine.delete(doc.id, uoc.id)
         assert deleted >= 0

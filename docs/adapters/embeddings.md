@@ -44,7 +44,7 @@ pip install crossvector[gemini]
 ```bash
 GEMINI_API_KEY="AI..."  # Get at https://makersuite.google.com/app/apikey
 # Optional: Override default model
-VECTOR_EMBEDDING_MODEL="models/text-embedding-004"
+VECTOR_EMBEDDING_MODEL="gemini-embedding-001"
 ```
 
 **Programmatic:**
@@ -52,7 +52,7 @@ VECTOR_EMBEDDING_MODEL="models/text-embedding-004"
 ```python
 from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
 
-# Uses default model (models/text-embedding-004)
+# Uses default model (gemini-embedding-001)
 embedding = GeminiEmbeddingAdapter()
 
 # Or specify model explicitly

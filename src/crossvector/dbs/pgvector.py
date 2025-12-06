@@ -38,7 +38,6 @@ from crossvector.exceptions import (
 from crossvector.querydsl.compilers.pgvector import PgVectorWhereCompiler, pgvector_where
 from crossvector.schema import VectorDocument
 from crossvector.settings import settings as api_settings
-from crossvector.types import DocIds
 from crossvector.utils import (
     apply_update_fields,
     extract_pk,
@@ -701,11 +700,11 @@ class PgVectorAdapter(VectorDBAdapter):
         # Return refreshed document
         return self.get(pk)
 
-    def delete(self, ids: DocIds) -> int:
-        """Delete document(s) by ID.
+    def delete(self, *args) -> int:
+        """Delete documents by ID.
 
         Args:
-            ids: Single document ID or list of IDs to delete
+                *args: One or more document IDs (varargs) to delete
 
         Returns:
             Number of documents deleted
@@ -716,25 +715,19 @@ class PgVectorAdapter(VectorDBAdapter):
         if not self._client:
             raise CollectionNotInitializedError("Connection is not initialized", operation="delete", adapter="PgVector")
 
-        # Convert single ID to list
-        if isinstance(ids, (str, int)):
-            pks = [ids]
-        else:
-            pks = list(ids) if ids else []
-
-        if not pks:
+        if not args:
             return 0
 
-        if len(pks) == 1:
+        if len(args) == 1:
             sql = f"DELETE FROM {self.collection_name} WHERE id = %s"
-            self.cursor.execute(sql, (pks[0],))
+            self.cursor.execute(sql, (args[0],))
         else:
             sql = f"DELETE FROM {self.collection_name} WHERE id = ANY(%s)"
-            self.cursor.execute(sql, (pks,))
+            self.cursor.execute(sql, (list(args),))
 
         self.client.commit()
         deleted = self.cursor.rowcount
-        self.logger.message(f"Deleted {deleted} document(s).")
+        self.logger.message(f"Deleted {deleted} documents.")
         return deleted
 
     # ------------------------------------------------------------------
@@ -820,7 +813,7 @@ class PgVectorAdapter(VectorDBAdapter):
             )
 
         self.client.commit()
-        self.logger.message(f"Bulk created {len(created_docs)} document(s).")
+        self.logger.message(f"Bulk created {len(created_docs)} documents.")
         return created_docs
 
     def bulk_update(
@@ -935,7 +928,7 @@ class PgVectorAdapter(VectorDBAdapter):
             self._flush_upsert_batch(batch)
 
         self.client.commit()
-        self.logger.message(f"Upserted {len(upserted)} document(s).")
+        self.logger.message(f"Upserted {len(upserted)} documents.")
         return upserted
 
     def _flush_upsert_batch(self, batch: List[Tuple[Any, Any, Any, str]]) -> None:

@@ -39,7 +39,6 @@ from crossvector.exceptions import (
 from crossvector.querydsl.compilers.astradb import AstraDBWhereCompiler, astradb_where
 from crossvector.schema import VectorDocument
 from crossvector.settings import settings as api_settings
-from crossvector.types import DocIds
 from crossvector.utils import (
     apply_update_fields,
     chunk_iter,
@@ -625,11 +624,11 @@ class AstraDBAdapter(VectorDBAdapter):
             refreshed["vector"] = refreshed.pop("$vector")
         return VectorDocument.from_kwargs(**refreshed)
 
-    def delete(self, ids: DocIds) -> int:
-        """Delete document(s) by ID.
+    def delete(self, *args) -> int:
+        """Delete documents by ID.
 
         Args:
-            ids: Single document ID or list of IDs to delete
+            *args: One or more document IDs to delete
 
         Returns:
             Number of documents deleted
@@ -640,23 +639,17 @@ class AstraDBAdapter(VectorDBAdapter):
         if not self.collection:
             raise CollectionNotInitializedError("Collection is not initialized", operation="delete", adapter="AstraDB")
 
-        # Convert single ID to list
-        if isinstance(ids, (str, int)):
-            pks = [ids]
-        else:
-            pks = list(ids) if ids else []
-
-        if not pks:
+        if not args:
             return 0
 
-        if len(pks) == 1:
-            result = self.collection.delete_one({"_id": pks[0]})
+        if len(args) == 1:
+            result = self.collection.delete_one({"_id": args[0]})
             deleted = result.deleted_count
         else:
-            result = self.collection.delete_many({"_id": {"$in": pks}})
+            result = self.collection.delete_many({"_id": {"$in": args}})
             deleted = result.deleted_count
 
-        self.logger.message(f"Deleted {deleted} document(s).")
+        self.logger.message(f"Deleted {deleted} documents.")
         return deleted
 
     # ------------------------------------------------------------------
@@ -726,7 +719,7 @@ class AstraDBAdapter(VectorDBAdapter):
             else:
                 self.collection.insert_many(items_to_insert)
 
-        self.logger.message(f"Bulk created {len(created_docs)} document(s).")
+        self.logger.message(f"Bulk created {len(created_docs)} documents.")
         return created_docs
 
     def bulk_update(
@@ -804,7 +797,7 @@ class AstraDBAdapter(VectorDBAdapter):
                 self.collection.update_one({"_id": pk}, {"$set": set_payload})
                 updated_docs.append(doc)
 
-        self.logger.message(f"Bulk updated {len(updated_docs)} document(s).")
+        self.logger.message(f"Bulk updated {len(updated_docs)} documents.")
         return updated_docs
 
     def upsert(self, docs: List[VectorDocument], batch_size: int = None) -> List[VectorDocument]:
@@ -860,5 +853,5 @@ class AstraDBAdapter(VectorDBAdapter):
                 self.collection.insert_many(to_insert)
 
         total = len(updated) + len(inserted)
-        self.logger.message(f"Upserted {total} document(s) (created={len(inserted)}, updated={len(updated)}).")
+        self.logger.message(f"Upserted {total} documents (created={len(inserted)}, updated={len(updated)}).")
         return updated + inserted
