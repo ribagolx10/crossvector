@@ -342,7 +342,7 @@ class BenchmarkRunner:
         print(f"{'=' * 60}")
 
         # Initialize engine
-        engine = init_func(embedding)
+        engine = init_func(embedding, self.collection_name)
         if not engine:
             return {"error": "Backend not available"}
 
