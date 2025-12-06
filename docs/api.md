@@ -28,12 +28,12 @@ VectorEngine(
 
 ```python
 from crossvector import VectorEngine
-from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
+from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
 from crossvector.dbs.pgvector import PgVectorAdapter
 
 engine = VectorEngine(
     db=PgVectorAdapter(),
-    embedding=OpenAIEmbeddingAdapter(),
+    embedding=GeminiEmbeddingAdapter(),
     collection_name="documents",
     store_text=True
 )
@@ -60,7 +60,7 @@ Access the embedding adapter instance.
 
 ```python
 emb = engine.embedding
-print(emb.model_name)  # "text-embedding-3-small"
+print(emb.model_name)  # "models/text-embedding-004"
 ```
 
 #### `engine.supports_metadata_only`

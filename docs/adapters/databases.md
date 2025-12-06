@@ -40,7 +40,7 @@ pip install crossvector[astradb]
 ```bash
 ASTRA_DB_APPLICATION_TOKEN="AstraCS:xxx"
 ASTRA_DB_API_ENDPOINT="https://xxx.apps.astra.datastax.com"
-ASTRA_DB_KEYSPACE="default_keyspace"  # Optional
+# Note: Collection name uses VECTOR_COLLECTION_NAME (shared setting)
 ```
 
 **Programmatic:**
@@ -727,11 +727,11 @@ Same code works across all backends:
 
 ```python
 from crossvector import VectorEngine
-from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
+from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
 from crossvector.querydsl.q import Q
 
 # Create embedding adapter (same for all)
-embedding = OpenAIEmbeddingAdapter()
+embedding = GeminiEmbeddingAdapter()
 
 # Choose backend (interchangeable)
 if backend == "astradb":

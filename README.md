@@ -93,23 +93,27 @@ pip install crossvector
 ### With Specific Backends
 
 ```bash
-# AstraDB + OpenAI
-pip install crossvector[astradb,openai]
+# Recommended: PgVector + Gemini (free tier)
+pip install crossvector[pgvector,gemini]
 
-# ChromaDB + OpenAI
+# Alternative: ChromaDB + Gemini (cloud or local)
+pip install crossvector[chromadb,gemini]
+
+# With OpenAI (requires paid API key)
+pip install crossvector[pgvector,openai]
 pip install crossvector[chromadb,openai]
 
 # Milvus + Gemini
 pip install crossvector[milvus,gemini]
 
-# PgVector + OpenAI
-pip install crossvector[pgvector,openai]
+# AstraDB + OpenAI
+pip install crossvector[astradb,openai]
 ```
 
-### All Backends and Providers
+### All Backends
 
 ```bash
-# Everything
+# Install everything
 pip install crossvector[all]
 
 # All databases only
@@ -123,20 +127,26 @@ pip install crossvector[astradb,all-embeddings]
 
 ## Quick Start
 
+> 💡 **Recommended**: Use `GeminiEmbeddingAdapter` for most use cases - free tier, faster search (1.5x), smaller vectors (768 vs 1536 dims). See [benchmarks](benchmark.md) for details.
+
 ### Basic Usage
 
 ```python
 from crossvector import VectorEngine
-from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
+from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
 from crossvector.dbs.pgvector import PgVectorAdapter
 
-# Initialize engine (uses default models if not specified)
+# Initialize engine with Gemini (recommended: free tier, fast performance)
 engine = VectorEngine(
-    embedding=OpenAIEmbeddingAdapter(),  # Uses text-embedding-3-small by default
+    embedding=GeminiEmbeddingAdapter(),  # Free tier, 1536-dim vectors
     db=PgVectorAdapter(),
     collection_name="my_documents",
     store_text=True
 )
+
+# Alternative: OpenAI (requires paid API key, 1536-dim vectors)
+# from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
+# embedding = OpenAIEmbeddingAdapter()
 
 # Create documents (flexible input formats)
 doc1 = engine.create(text="Python is a programming language")
@@ -452,8 +462,8 @@ Different backends have varying feature support:
 | Feature | AstraDB | ChromaDB | Milvus | PgVector |
 |---------|---------|----------|--------|----------|
 | Vector Search | ✅ | ✅ | ✅ | ✅ |
-| Metadata-Only Search | ✅ | ✅ | ❌ | ✅ |
-| Nested Metadata | ✅ | ✅* | ❌ | ✅ |
+| Metadata-Only Search | ✅ | ✅ | ✅ | ✅ |
+| Nested Metadata | ✅ | ✅ | ✅ | ✅ |
 | Numeric Comparisons | ✅ | ✅ | ✅ | ✅ |
 | Text Storage | ✅ | ✅ | ✅ | ✅ |
 
@@ -537,28 +547,9 @@ engine = VectorEngine(embedding=embedding, db=db)
 
 ## Embedding Providers
 
-### OpenAI
+> 💡 **Recommended**: Start with **Gemini** for free tier and faster performance. See [benchmark comparison](benchmark.md).
 
-```python
-from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
-
-# Default model (text-embedding-3-small, 1536 dims)
-embedding = OpenAIEmbeddingAdapter()
-
-# Or use VECTOR_EMBEDDING_MODEL from .env
-# VECTOR_EMBEDDING_MODEL=text-embedding-3-large
-embedding = OpenAIEmbeddingAdapter()  # Uses env var
-
-# Explicit model override
-embedding = OpenAIEmbeddingAdapter(model_name="text-embedding-3-large")
-```
-
-**Supported Models:**
-- `text-embedding-3-small` (1536 dims, default)
-- `text-embedding-3-large` (3072 dims)
-- `text-embedding-ada-002` (1536 dims, legacy)
-
-### Gemini
+### Gemini (Recommended)
 
 ```python
 from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
@@ -566,21 +557,53 @@ from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
 # Default model (gemini-embedding-001, 1536 dims)
 embedding = GeminiEmbeddingAdapter()
 
-# Or use VECTOR_EMBEDDING_MODEL from .env
-# VECTOR_EMBEDDING_MODEL=gemini-embedding-001
-embedding = GeminiEmbeddingAdapter()  # Uses env var
+# Explicit model specification
+embedding = GeminiEmbeddingAdapter(model_name="models/text-embedding-004", dim=768)
+```
 
-# With custom dimensions (768, 1536, 3072)
-embedding = GeminiEmbeddingAdapter(dim=768)
+**Why Choose Gemini:**
+- ✅ **Free tier**: 1,500 requests/min (vs OpenAI paid only)
+- ✅ **Faster search**: 234ms avg (1.5x faster than OpenAI)
+- ✅ **Efficient**: 768 dims = 50% less storage than OpenAI
+- ✅ **Quality**: Comparable accuracy to OpenAI
 
-# With task type
-embedding = GeminiEmbeddingAdapter(
-    task_type="retrieval_document"  # or "retrieval_query", "semantic_similarity"
-)
+**Configuration:**
+```bash
+GEMINI_API_KEY=AI...  # Get free key at https://makersuite.google.com/app/apikey
 ```
 
 **Supported Models:**
-- `gemini-embedding-001` (768-3072 dims, default, recommended)
+- `gemini-embedding-001` (1536 dims, **recommended**)
+- `models/text-embedding-004` (768 dims)
+
+### OpenAI (Alternative)
+
+```python
+from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
+
+# Default model (text-embedding-3-small, 1536 dims)
+embedding = OpenAIEmbeddingAdapter()
+
+# Explicit model specification
+embedding = OpenAIEmbeddingAdapter(model_name="text-embedding-3-large")
+```
+
+**When to Use OpenAI:**
+- ✅ Need 1536 or 3072 dimensions
+- ✅ Already have OpenAI API budget
+- ✅ Prefer OpenAI ecosystem integration
+
+**Configuration:**
+```bash
+OPENAI_API_KEY=sk-...  # Paid API key from https://platform.openai.com
+```
+
+**Supported Models:**
+- `text-embedding-3-small` (1536 dims, default)
+- `text-embedding-3-large` (3072 dims)
+- `text-embedding-ada-002` (1536 dims, legacy)
+
+- `gemini-embedding-001` (1536 dims, default)
 - `text-embedding-005` (768 dims)
 - `text-embedding-004` (768 dims, legacy)
 

@@ -1,43 +1,52 @@
 # Quick Start Guide
 
-This guide will get you up and running with CrossVector in minutes.
+Get started with CrossVector in 5 minutes.
+
+> 💡 **Recommended**: This guide uses **Gemini** (free tier, faster). For OpenAI, see [alternative setup](#using-openai-instead).
 
 ## Prerequisites
 
-1. Install CrossVector with your chosen backend and embedding provider:
+1. **Python 3.11+** installed
+2. **API Key** for embedding provider:
+   - **Gemini**: Free at [Google AI Studio](https://makersuite.google.com/app/apikey)
+   - OpenAI: Paid at [OpenAI Platform](https://platform.openai.com)
+
+## Installation
 
 ```bash
-pip install crossvector[pgvector,openai]
+# Recommended: PgVector + Gemini
+pip install crossvector[pgvector,gemini]
+
+# Alternative: ChromaDB + Gemini (for quick prototyping)
+pip install crossvector[chromadb,gemini]
 ```
 
-2. Set up environment variables (create a `.env` file):
+## Configuration
+
+Create a `.env` file:
 
 ```bash
-OPENAI_API_KEY=sk-...
+# Gemini API key (free tier)
+GEMINI_API_KEY=AI...
+
+# PgVector connection
 PGVECTOR_HOST=localhost
 PGVECTOR_PORT=5432
-PGVECTOR_DBNAME=vector_db
 PGVECTOR_USER=postgres
 PGVECTOR_PASSWORD=postgres
 ```
 
-**Note:** CrossVector uses strict configuration validation. Missing or conflicting settings will raise `MissingConfigError` with helpful hints about what to fix.
-
-## Basic Usage
-
-### Initialize the Engine
+## Basic Example
 
 ```python
 from crossvector import VectorEngine
-from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
+from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
 from crossvector.dbs.pgvector import PgVectorAdapter
 
-# Create engine instance
-# Adapters use lazy initialization - clients are created only when first used
+# Initialize engine with Gemini (free tier, 1536-dim vectors)
 engine = VectorEngine(
-    embedding=OpenAIEmbeddingAdapter(model_name="text-embedding-3-small"),
-    db=PgVectorAdapter(),
-    collection_name="my_documents",
+    collection_name="quickstart_docs",
+    embedding=GeminiEmbeddingAdapter(model_name="gemini-embedding-001"),
     store_text=True  # Store original text
 )
 
@@ -246,9 +255,10 @@ results = engine.search(
 
 ```python
 from crossvector.dbs.astradb import AstraDBAdapter
+from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
 
 engine = VectorEngine(
-    embedding=OpenAIEmbeddingAdapter(),
+    embedding=GeminiEmbeddingAdapter(),
     db=AstraDBAdapter(),  # Uses ASTRA_DB_* env vars
     collection_name="vectors"
 )
@@ -259,18 +269,20 @@ engine = VectorEngine(
 ```python
 from crossvector.dbs.chroma import ChromaAdapter
 
+from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
+
 # Cloud mode (uses CHROMA_API_KEY, CHROMA_TENANT, CHROMA_DATABASE)
 engine = VectorEngine(
-    embedding=OpenAIEmbeddingAdapter(),
     db=ChromaAdapter(),
+    embedding=GeminiEmbeddingAdapter(),
     collection_name="vectors"
 )
 
 # Local mode (uses CHROMA_PERSIST_DIR)
 # Set CHROMA_PERSIST_DIR=./chroma_data in .env
 engine = VectorEngine(
-    embedding=OpenAIEmbeddingAdapter(),
     db=ChromaAdapter(),
+    embedding=GeminiEmbeddingAdapter(),
     collection_name="vectors"
 )
 ```
@@ -279,28 +291,16 @@ engine = VectorEngine(
 
 ```python
 from crossvector.dbs.milvus import MilvusAdapter
+from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
 
 engine = VectorEngine(
-    embedding=OpenAIEmbeddingAdapter(),
+    embedding=GeminiEmbeddingAdapter(),
     db=MilvusAdapter(),  # Uses MILVUS_API_ENDPOINT, MILVUS_API_KEY
     collection_name="vectors"
 )
 ```
 
-### Gemini Embeddings
 
-```python
-from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
-
-engine = VectorEngine(
-    embedding=GeminiEmbeddingAdapter(
-        model_name="gemini-embedding-001",
-        dim=1536
-    ),
-    db=PgVectorAdapter(),
-    collection_name="vectors"
-)
-```
 
 ## Error Handling
 
@@ -336,14 +336,14 @@ Here's a full working example:
 
 ```python
 from crossvector import VectorEngine
-from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
+from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
 from crossvector.dbs.pgvector import PgVectorAdapter
 from crossvector.querydsl.q import Q
 
-# Initialize
+# Initialize with Gemini
 engine = VectorEngine(
-    embedding=OpenAIEmbeddingAdapter(),
     db=PgVectorAdapter(),
+    embedding=GeminiEmbeddingAdapter(),
     collection_name="articles"
 )
 
@@ -396,24 +396,26 @@ print(f"\nTotal articles: {total}")
 ```python
 from crossvector.dbs.chroma import ChromaAdapter
 
+from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
+
 # Option 1: Cloud (set CHROMA_API_KEY in .env)
 engine = VectorEngine(
-    embedding=OpenAIEmbeddingAdapter(),
     db=ChromaAdapter(),
+    embedding=GeminiEmbeddingAdapter(),
     collection_name="cloud_docs"
 )
 
 # Option 2: Self-hosted HTTP (set CHROMA_HOST in .env, not CHROMA_PERSIST_DIR)
 engine = VectorEngine(
-    embedding=OpenAIEmbeddingAdapter(),
     db=ChromaAdapter(),
+    embedding=GeminiEmbeddingAdapter(),
     collection_name="http_docs"
 )
 
 # Option 3: Local persistence (set CHROMA_PERSIST_DIR in .env, not CHROMA_HOST)
 engine = VectorEngine(
-    embedding=OpenAIEmbeddingAdapter(),
     db=ChromaAdapter(),
+    embedding=GeminiEmbeddingAdapter(),
     collection_name="local_docs"
 )
 
@@ -434,8 +436,8 @@ try:
     # Conflicting ChromaDB config
     # CHROMA_HOST="localhost" AND CHROMA_PERSIST_DIR="./data"
     engine = VectorEngine(
-        embedding=OpenAIEmbeddingAdapter(),
         db=ChromaAdapter(),
+        embedding=GeminiEmbeddingAdapter(),
         collection_name="docs"
     )
 except MissingConfigError as e:
@@ -447,6 +449,50 @@ try:
 except DocumentNotFoundError as e:
     print(f"Document not found: {e.document_id}")
 ```
+
+## Using OpenAI Instead
+
+If you prefer OpenAI embeddings:
+
+```bash
+# Install with OpenAI
+pip install crossvector[pgvector,openai]
+```
+
+```bash
+# .env configuration
+OPENAI_API_KEY=sk-...  # Paid API key
+PGVECTOR_HOST=localhost
+PGVECTOR_PORT=5432
+PGVECTOR_USER=postgres
+PGVECTOR_PASSWORD=postgres
+```
+
+```python
+from crossvector import VectorEngine
+from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
+from crossvector.dbs.pgvector import PgVectorAdapter
+
+engine = VectorEngine(
+    db=PgVectorAdapter(),
+    embedding=OpenAIEmbeddingAdapter(model_name="text-embedding-3-small"),  # 1536 dims
+    collection_name="my_documents"
+)
+
+# Rest of the code is identical
+```
+
+**OpenAI Models:**
+- `text-embedding-3-small` (1536 dims, default)
+- `text-embedding-3-large` (3072 dims)
+
+**Trade-offs:**
+- ✅ Slightly higher accuracy for some use cases
+- ✅ Larger vectors (1536 vs 768 dims)
+- ❌ Requires paid API key
+- ❌ 1.5x slower search than Gemini
+
+---
 
 ## Next Steps
 
