@@ -6,12 +6,14 @@ Backend-specific features, capabilities, and configuration for vector databases.
 
 CrossVector supports 4 vector database backends:
 
-| Backend | Nested Metadata | Metadata-Only Search | Requires Vector | License |
-|---------|----------------|----------------------|-----------------|---------|
-| **AstraDB** | ✅ Full | ✅ Yes | ❌ No | Proprietary |
-| **ChromaDB** | ❌ Flattened | ✅ Yes | ❌ No | Apache 2.0 |
-| **Milvus** | ✅ Full | ❌ No | ✅ Yes | Apache 2.0 |
-| **PgVector** | ✅ Full | ✅ Yes | ❌ No | PostgreSQL |
+| Backend | Nested Metadata | Metadata-Only Search | License | Recommended For |
+|---------|----------------|----------------------|---------|-----------------|
+| **AstraDB** | Yes | Yes | Proprietary | Cloud-hosted, serverless, auto-scaling |
+| **ChromaDB** | Via Dot Notation | Yes | Apache 2.0 | Prototyping, simple deployments, cloud/local |
+| **Milvus** | Yes | Yes | Apache 2.0 | Large-scale, distributed, high-performance |
+| **PgVector** | Full JSONB | Yes | PostgreSQL | Existing PostgreSQL infrastructure, ACID |
+
+*Note: Milvus supports metadata-only via `query()` method, but recommended to always provide vector for optimal performance.
 
 ---
 
@@ -21,11 +23,11 @@ DataStax Astra DB - Serverless Cassandra with vector search.
 
 ### Features
 
-- ✅ **Full nested metadata** - Complete JSON document support
-- ✅ **Metadata-only search** - Filter without vector similarity
-- ✅ **Universal operators** - All 8 operators supported
-- ✅ **Scalable** - Serverless auto-scaling
-- ✅ **Managed** - Fully hosted service
+- **Full nested metadata** - Complete JSON document support
+- **Metadata-only search** - Filter without vector similarity
+- **Universal operators** - All 10 operators supported
+- **Scalable** - Serverless auto-scaling
+- **Managed** - Fully hosted service
 
 ### Installation
 
@@ -57,37 +59,70 @@ db = AstraDBAdapter(
 
 ### Schema
 
-AstraDB uses special field names:
+AstraDB accepts flexible primary key field names:
 
-- `_id` - Document primary key
-- `$vector` - Embedding vector
-- All other fields are metadata
+```python
+# All three forms are equivalent - use your preferred convention
 
-**Example document:**
+# Form 1: pk (recommended - cleaner)
+doc = engine.create({
+    "pk": "doc-123",
+    "text": "Document content",
+    "category": "tech",
+    "author": {"name": "John", "role": "admin"}
+})
 
-```json
-{
-  "_id": "doc-123",
-  "$vector": [0.1, 0.2, ...],
-  "text": "Document content",
-  "category": "tech",
-  "author": {
-    "name": "John",
-    "role": "admin"
-  }
-}
+# Form 2: id (common alternative)
+doc = engine.create({
+    "id": "doc-123",
+    "text": "Document content",
+    "category": "tech"
+})
+
+# Form 3: _id (legacy AstraDB style)
+doc = engine.create({
+    "_id": "doc-123",
+    "text": "Document content",
+    "category": "tech"
+})
+
+# Form 4: Dynamic (auto-generated if not provided)
+doc = engine.create({
+    "text": "Document content",
+    "category": "tech"
+    # id is auto-generated based on PRIMARY_KEY_MODE setting
+})
 ```
+
+**Behind the scenes:**
+- CrossVector extracts `pk`, `id`, or `_id` from input (in priority order)
+- All are stored as `_id` in AstraDB (internal requirement)
+- Retrieved documents have `id` field for consistency
+- Other fields become metadata
 
 ### Nested Metadata
 
-Full JSON document support:
+Full JSON document support with dynamic and nested queries:
 
 ```python
 from crossvector.querydsl.q import Q
 
-# Deep nesting
+# Create with nested metadata (using pk field)
+doc = engine.create({
+    "pk": "article-1",
+    "text": "Deep learning guide",
+    "author": {
+        "name": "Alice",
+        "profile": {"verified": True, "tier": "premium"}
+    },
+    "post": {
+        "stats": {"views": 5000, "likes": 200}
+    }
+})
+
+# Query deep nesting with double underscore notation
 results = engine.search(
-    "query",
+    "machine learning",
     where=Q(author__profile__verified=True) & Q(post__stats__views__gte=1000)
 )
 ```
@@ -146,15 +181,15 @@ Open-source embedding database with Python-first API.
 
 ### Features
 
-- ⚠️ **Flattened metadata** - No nested object support (auto-flattened)
-- ✅ **Metadata-only search** - Filter without vector similarity
-- ✅ **Multiple deployment modes** - Cloud, HTTP, or local persistence
-- ✅ **Strict config validation** - Prevents conflicting settings
-- ✅ **Explicit imports** - Clear dependency management
-- ✅ **Lazy initialization** - Optimal resource usage
-- ✅ **Common operators** - All 8 operators supported
-- ✅ **In-memory/persistent** - Multiple storage backends
-- ✅ **Open source** - Apache 2.0 license
+- **Nested metadata via dot notation** - Access nested fields using dot syntax (e.g., `user.role`)
+- **Metadata-only search** - Filter without vector similarity
+- **Multiple deployment modes** - Cloud, HTTP, or local persistence
+- **Strict config validation** - Prevents conflicting settings
+- **Explicit imports** - Clear dependency management
+- **Lazy initialization** - Optimal resource usage
+- **All 10 operators** - eq, ne, gt, gte, lt, lte, in, nin, and, or supported
+- **In-memory/persistent** - Multiple storage backends
+- **Open source** - Apache 2.0 license
 
 ### Installation
 
@@ -209,16 +244,16 @@ db = ChromaAdapter()  # Uses CHROMA_PERSIST_DIR from env
 CrossVector enforces strict configuration validation:
 
 ```python
-# ✅ Valid: Cloud only
+# Valid: Cloud only
 CHROMA_API_KEY="..."
 
-# ✅ Valid: HTTP only
+# Valid: HTTP only
 CHROMA_HOST="localhost"
 
-# ✅ Valid: Local only
+# Valid: Local only
 CHROMA_PERSIST_DIR="./data"
 
-# ❌ Invalid: Conflicting settings
+# Invalid: Conflicting settings
 CHROMA_HOST="localhost"
 CHROMA_PERSIST_DIR="./data"
 # Raises: MissingConfigError with helpful message
@@ -226,45 +261,66 @@ CHROMA_PERSIST_DIR="./data"
 
 ### Schema
 
-ChromaDB automatically flattens nested metadata:
+ChromaDB automatically flattens nested metadata using dot notation:
 
-**Input:**
+**Input (nested structure):**
 
 ```python
 metadata = {
     "user": {
         "name": "John",
-        "role": "admin"
+        "role": "admin",
+        "profile": {
+            "verified": True
+        }
     }
 }
 ```
 
-**Stored as:**
+**Stored as (flattened with dots):**
 
 ```python
 {
     "user.name": "John",
-    "user.role": "admin"
+    "user.role": "admin",
+    "user.profile.verified": True
 }
 ```
 
-### Nested Metadata
-
-Nested queries work via automatic flattening:
+**Access via dot notation:**
 
 ```python
 from crossvector.querydsl.q import Q
 
-# This works (auto-flattened)
+# Query nested fields using double underscore (converts to dot notation)
 results = engine.search(
     "query",
-    where=Q(user__role="admin")
+    where=Q(user__role="admin") & Q(user__profile__verified=True)
 )
 
-# Compiled to: {"user.role": {"$eq": "admin"}}
+# Internally compiled to: {"user.role": {"$eq": "admin"}, "user.profile.verified": {"$eq": True}}
 ```
 
-**Limitation:** Cannot query nested structures as objects.
+### Nested Metadata Support
+
+ChromaDB supports nested metadata through automatic dot notation flattening:
+
+```python
+from crossvector.querydsl.q import Q
+
+# Nested queries work via dot notation
+results = engine.search(
+    "query",
+    where=Q(user__role="admin") & Q(user__profile__verified=True)
+)
+
+# Compiled to: {"user.role": {"$eq": "admin"}, "user.profile.verified": {"$eq": True}}
+```
+
+**How it works:**
+- Double underscore `__` in Q objects maps to dot notation `.` in storage
+- Arbitrarily deep nesting is supported
+- Queries are automatically flattened to match storage format
 
 ### Capabilities
 
@@ -319,7 +375,7 @@ CHROMA_HOST="localhost"
 CHROMA_PERSIST_DIR="./chroma_data"
 
 # Don't mix deployment modes - causes MissingConfigError
-# ❌ Don't do: CHROMA_HOST + CHROMA_PERSIST_DIR
+# Don't do: CHROMA_HOST + CHROMA_PERSIST_DIR
 
 # Batch operations for efficiency
 engine.bulk_create(docs, batch_size=100)
@@ -336,12 +392,12 @@ High-performance distributed vector database.
 
 ### Features
 
-- ✅ **Full nested metadata** - JSON field support (via dynamic fields)
-- ✅ **Metadata-only search** - Query without vector via `query()` method
-- ✅ **Common operators** - All 8 operators supported
-- ✅ **High performance** - Distributed architecture
-- ✅ **Scalable** - Horizontal scaling
-- ✅ **Lazy initialization** - Optimal resource usage
+- **Full nested metadata** - JSON field support (via dynamic fields)
+- **Metadata-only search** - Query without vector via `query()` method (with `supports_metadata_only=True`)
+- **All 10 operators** - eq, ne, gt, gte, lt, lte, in, nin, and, or supported
+- **High performance** - Distributed architecture
+- **Scalable** - Horizontal scaling
+- **Lazy initialization** - Optimal resource usage
 
 ### Installation
 
@@ -388,24 +444,27 @@ Q(status__in=["active", "pending"])
 # => 'status in ["active", "pending"]'
 ```
 
-### Vector Requirement
+### Metadata-Only Search Support
 
-**All queries require vector input:**
+Milvus supports metadata-only search (no vector required):
 
 ```python
-# ✅ Correct
-results = engine.search("query text", where=Q(category="tech"))
+# Correct - Metadata-only query
+results = engine.search(query=None, where=Q(category="tech"), limit=10)
 
-# ❌ Error: Milvus requires vector
-results = engine.search(query=None, where=Q(category="tech"))
+# Also valid - Vector + filter
+results = engine.search("query text", where=Q(category="tech"))
 ```
 
-**Workaround for metadata-only:**
+Check support:
 
 ```python
-if not engine.supports_metadata_only:
-    # Use empty string to generate minimal vector
-    results = engine.search("", where=Q(status="active"))
+if engine.supports_metadata_only:
+    # Can search without vector
+    results = engine.search(query=None, where=filters)
+else:
+    # Need to provide vector
+    results = engine.search(vector, where=filters)
 ```
 
 ### Nested Metadata
@@ -429,10 +488,16 @@ results = engine.search(
 ```python
 engine = VectorEngine(db=MilvusAdapter(), embedding=...)
 
-# Vector required
+# Metadata-only search
 results = engine.search(
-    "query text",  # Must provide query
+    query=None,
     where=Q(category="tech") & Q(score__gte=0.8)
+)
+
+# Vector + filter
+results = engine.search(
+    "query text",
+    where=Q(status="published") & Q(priority__in=[1, 2, 3])
 )
 
 # All operators
@@ -452,13 +517,17 @@ results = engine.search(
 - **Collection limits:** Billions of vectors
 - **Throughput:** Very high (distributed)
 - **Latency:** <10ms (optimized indexes)
-- **Cost:** Free (self-hosted)
+- **Cost:** Free (self-hosted), pay-as-you-go (Zilliz Cloud)
 
 ### Best Practices
 
 ```python
-# Always provide query vector
-results = engine.search("query", where=filters)
+# Use metadata-only for fast filtering
+if engine.supports_metadata_only:
+    results = engine.search(query=None, where=filters, limit=100)
+
+# Combine vector and metadata
+results = engine.search("query", where=Q(status="active"))
 
 # Use nested metadata
 metadata = {
@@ -481,11 +550,11 @@ PostgreSQL extension for vector similarity search.
 
 ### Features
 
-- ✅ **Full nested metadata** - JSONB support with `#>>` operator
-- ✅ **Metadata-only search** - Filter without vector similarity
-- ✅ **Common operators** - All 8 operators with numeric casting
-- ✅ **ACID transactions** - Full PostgreSQL guarantees
-- ✅ **Mature ecosystem** - PostgreSQL tooling
+- **Full nested metadata** - JSONB support with `#>>` operator
+- **Metadata-only search** - Filter without vector similarity
+- **All 10 operators** - Supported with numeric casting
+- **ACID transactions** - Full PostgreSQL guarantees
+- **Mature ecosystem** - PostgreSQL tooling
 
 ### Installation
 
@@ -666,58 +735,60 @@ results = engine.search(query=None, where={"status": {"$eq": "active"}})
 
 | Feature | AstraDB | ChromaDB | Milvus | PgVector |
 |---------|---------|----------|---------|----------|
-| **Nested Metadata** | ✅ Full | ❌ Flattened | ✅ Full | ✅ Full (JSONB) |
-| **Metadata-Only Search** | ✅ Yes | ✅ Yes | ❌ No | ✅ Yes |
-| **Numeric Casting** | ✅ Yes | ⚠️ Limited | ✅ Yes | ✅ Auto |
-| **Transaction Support** | ❌ No | ❌ No | ❌ No | ✅ ACID |
-| **Horizontal Scaling** | ✅ Auto | ❌ No | ✅ Yes | ⚠️ Read replicas |
-| **Managed Service** | ✅ Yes | ✅ Cloud | ⚠️ Zilliz | ❌ Self-host |
-| **Open Source** | ❌ No | ✅ Yes | ✅ Yes | ✅ Yes |
+| **Nested Metadata** | Full JSON | Via Dot Notation | Full JSON | Full JSONB |
+| **Metadata-Only Search** | Yes | Yes | Yes | Yes |
+| **Numeric Casting** | Yes | Limited | Yes | Auto |
+| **Transaction Support** | No | No | No | ACID |
+| **Horizontal Scaling** | Auto | No | Yes | Read replicas |
+| **Managed Service** | Yes | Cloud | Zilliz Cloud | Self-host |
+| **Open Source** | No | Yes | Yes | Yes |
 
 ### Operator Support
 
-All backends support the same 8 operators:
+All backends support the same 10 operators:
 
 | Operator | AstraDB | ChromaDB | Milvus | PgVector |
 |----------|---------|----------|---------|----------|
-| `$eq` | ✅ | ✅ | ✅ | ✅ |
-| `$ne` | ✅ | ✅ | ✅ | ✅ |
-| `$gt` | ✅ | ✅ | ✅ | ✅ |
-| `$gte` | ✅ | ✅ | ✅ | ✅ |
-| `$lt` | ✅ | ✅ | ✅ | ✅ |
-| `$lte` | ✅ | ✅ | ✅ | ✅ |
-| `$in` | ✅ | ✅ | ✅ | ✅ |
-| `$nin` | ✅ | ✅ | ✅ | ✅ |
+| `$eq` | Yes | Yes | Yes | Yes |
+| `$ne` | Yes | Yes | Yes | Yes |
+| `$gt` | Yes | Yes | Yes | Yes |
+| `$gte` | Yes | Yes | Yes | Yes |
+| `$lt` | Yes | Yes | Yes | Yes |
+| `$lte` | Yes | Yes | Yes | Yes |
+| `$in` | Yes | Yes | Yes | Yes |
+| `$nin` | Yes | Yes | Yes | Yes |
+| `and` (&) | Yes | Yes | Yes | Yes |
+| `or` (\|) | Yes | Yes | Yes | Yes |
 
 ### Use Case Recommendations
 
 #### Choose AstraDB if
 
-- ✅ Need managed serverless solution
-- ✅ Want full nested metadata support
-- ✅ Require high scalability
-- ✅ Prefer pay-as-you-go pricing
+- Need managed serverless solution
+- Want full nested metadata support
+- Require high scalability
+- Prefer pay-as-you-go pricing
 
 #### Choose ChromaDB if
 
-- ✅ Want simple setup (in-memory)
-- ✅ Building prototype/MVP
-- ✅ Don't need nested metadata
-- ✅ Prefer open source
+- Want simple setup (in-memory)
+- Building prototype/MVP
+- Prefer open source
+- Need multiple deployment options
 
 #### Choose Milvus if
 
-- ✅ Need maximum performance
-- ✅ Have large-scale deployment (billions of vectors)
-- ✅ Want distributed architecture
-- ✅ All queries include vector search
+- Need maximum performance
+- Have large-scale deployment (billions of vectors)
+- Want distributed architecture
+- Need full JSON nested metadata
 
 #### Choose PgVector if
 
-- ✅ Already using PostgreSQL
-- ✅ Need ACID transactions
-- ✅ Want full SQL capabilities
-- ✅ Prefer mature, stable ecosystem
+- Already using PostgreSQL
+- Need ACID transactions
+- Want full SQL capabilities
+- Prefer mature, stable ecosystem
 
 ---
 
@@ -755,7 +826,7 @@ doc = engine.create("Document text", category="tech")
 results = engine.search("query", where=Q(category="tech"), limit=10)
 ```
 
-**Only consideration:** Check `engine.supports_metadata_only` for Milvus.
+**Only consideration:** Check `engine.supports_metadata_only` for Milvus (it's now supported, but verify with your deployment).
 
 ---
 

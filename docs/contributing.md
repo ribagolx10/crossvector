@@ -282,14 +282,16 @@ class NewDBAdapter(VectorDBAdapter):
 
 ```python
 # src/crossvector/querydsl/compilers/newdb.py
-from crossvector.querydsl.compilers.base import WhereCompiler
+from crossvector.querydsl.compilers.base import BaseWhere
 from typing import Dict, Any
 
-class NewDBWhereCompiler(WhereCompiler):
+class NewDBWhereCompiler(BaseWhere):
     """Compile filters for NewDB."""
 
-    SUPPORTS_NESTED = True
-    REQUIRES_VECTOR = False
+    # Capability flags
+    SUPPORTS_NESTED = True  # Supports nested fields
+    REQUIRES_VECTOR = False  # Can search metadata-only
+    REQUIRES_AND_WRAPPER = False  # Multiple fields use implicit AND
 
     _OP_MAP = {
         "$eq": "==",
@@ -302,8 +304,12 @@ class NewDBWhereCompiler(WhereCompiler):
         "$nin": "not in",
     }
 
-    def compile(self, where: Dict[str, Any]) -> str:
+    def to_where(self, where: Dict[str, Any]) -> str:
         """Compile to NewDB filter format."""
+        pass
+
+    def to_expr(self, where: Dict[str, Any]) -> str:
+        """Convert to expression string."""
         pass
 ```
 
@@ -357,18 +363,12 @@ class NewProviderEmbeddingAdapter(EmbeddingAdapter):
         model_name: str = "default-model"
     ):
         self.api_key = api_key
-        self.model_name = model_name
-        self._dimensions = 768
+        super().__init__(model_name=model_name, dim=768)
 
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings for texts."""
         # Implementation
         pass
-
-    @property
-    def dimensions(self) -> int:
-        """Return embedding dimensions."""
-        return self._dimensions
 ```
 
 1. **Add tests:**
@@ -604,8 +604,8 @@ twine upload dist/*
 ### Getting Help
 
 - Check existing [documentation](https://thewebscraping.github.io/crossvector/)
-- Search [issues](https://github.com/yourusername/crossvector/issues)
-- Ask in [discussions](https://github.com/yourusername/crossvector/discussions)
+- Search [issues](https://github.com/thewebscraping/crossvector/issues)
+- Ask in [discussions](https://github.com/thewebscraping/crossvector/discussions)
 
 ### Reporting Bugs
 
@@ -668,4 +668,4 @@ Feel free to ask questions in:
 - GitHub Discussions (for general questions)
 - Pull Request comments (for specific code questions)
 
-Thank you for contributing to CrossVector! 🎉
+Thank you for contributing to CrossVector!

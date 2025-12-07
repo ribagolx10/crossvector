@@ -34,6 +34,11 @@ nav:
     - Database Adapters: adapters/databases.md
     - Embedding Adapters: adapters/embeddings.md
   - API Reference: api.md
+  - Advanced:
+    - Architecture: architecture.md
+    - Query DSL: querydsl.md
+    - Schema: schema.md
+    - Benchmarking: benchmarking.md
   - Contributing: contributing.md
 
 plugins:

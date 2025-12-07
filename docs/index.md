@@ -8,12 +8,12 @@ CrossVector provides a consistent, high-level API across multiple vector databas
 
 ## Key Features
 
-- **🔌 Pluggable Architecture**: 4 vector databases, 2 embedding providers, lazy initialization
-- **🎯 Unified API**: Consistent interface across all adapters with standardized error handling
-- **🔍 Advanced Querying**: Type-safe Query DSL with Q objects
-- **🚀 Performance**: Automatic batch embedding, bulk operations, lazy client initialization
-- **🛡️ Type-Safe**: Full Pydantic v2 validation and structured exceptions
-- **⚙️ Flexible Configuration**: Environment variables, explicit config validation, multiple PK strategies
+- **Pluggable Architecture**: 4 vector databases, 2 embedding providers, lazy initialization
+- **Unified API**: Consistent interface across all adapters with standardized error handling
+- **Advanced Querying**: Type-safe Query DSL with Q objects
+- **Performance**: Automatic batch embedding, bulk operations, lazy client initialization
+- **Type-Safe**: Full Pydantic v2 validation and structured exceptions
+- **Flexible Configuration**: Environment variables, explicit config validation, multiple PK strategies
 
 ## Quick Navigation
 
@@ -41,7 +41,7 @@ CrossVector provides a consistent, high-level API across multiple vector databas
 
 ## Quick Example
 
-> 💡 **Recommended**: Use Gemini for free tier and faster performance. [See why →](quickstart.md)
+> **Recommended**: Use Gemini for free tier and faster performance. [See why →](quickstart.md)
 
 ```python
 from crossvector import VectorEngine
@@ -61,9 +61,9 @@ results = engine.search("vector database library", limit=5)
 ```
 
 **Why Gemini?**
-- ✅ Free API tier (1,500 RPM)
-- ✅ 1.5x faster search than OpenAI
-- ✅ 50% smaller vectors (768 vs 1536 dims)
+- Free API tier (1,500 RPM)
+- 1.5x faster search than OpenAI
+- 50% smaller vectors (768 vs 1536 dims)
 
 **With OpenAI?** [See alternative setup →](quickstart.md#using-openai-instead)
 
@@ -79,20 +79,20 @@ results = engine.search(
 
 | Feature | AstraDB | ChromaDB | Milvus | PgVector |
 |---------|---------|----------|--------|----------|
-| Vector Search | ✅ | ✅ | ✅ | ✅ |
-| Metadata-Only Search | ✅ | ✅ | ✅ | ✅ |
-| Nested Metadata | ✅ | ✅* | ❌ | ✅ |
-| Numeric Comparisons | ✅ | ✅ | ✅ | ✅ |
-| Lazy Initialization | ✅ | ✅ | ✅ | ✅ |
-| Config Validation | ✅ | ✅ | ✅ | ✅ |
+| Vector Search | Yes | Yes | Yes | Yes |
+| Metadata-Only Search | Yes | Yes | Yes | Yes |
+| Nested Metadata | Yes | Yes* | No | Yes |
+| Numeric Comparisons | Yes | Yes | Yes | Yes |
+| Lazy Initialization | Yes | Yes | Yes | Yes |
+| Config Validation | Yes | Yes | Yes | Yes |
 
-*ChromaDB supports nested metadata via dot-notation when flattened.
+ChromaDB supports nested metadata via dot-notation when flattened.
 
 ## Status
 
 **Current Version**: 0.1.0 (Beta)
 
-⚠️ **Beta Status**: CrossVector is currently in beta. Do not use in production until version 1.0.
+**Beta Status**: CrossVector is currently in beta. Do not use in production until version 1.0.
 
 - API may change without notice
 - Database schemas may evolve
@@ -100,9 +100,9 @@ results = engine.search(
 
 **Recommended for:**
 
-- ✅ Prototyping and development
-- ✅ Learning vector databases
-- ❌ Production applications
+- Prototyping and development
+- Learning vector databases
+- Production applications
 
 ## Support
 
@@ -112,4 +112,4 @@ results = engine.search(
 
 ## License
 
-CrossVector is released under the MIT License. See [LICENSE](../LICENSE) for details.
+CrossVector is released under the MIT License. See [LICENSE](https://github.com/thewebscraping/crossvector/blob/main/LICENSE) for details.

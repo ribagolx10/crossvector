@@ -72,6 +72,24 @@ if engine.supports_metadata_only:
     results = engine.search(query=None, where={"status": {"$eq": "active"}})
 ```
 
+#### `engine.supports_vector_search`
+
+Check if the backend supports vector similarity search.
+
+```python
+if engine.supports_vector_search:
+    results = engine.search("query text")
+```
+
+#### `engine.collection_name`
+
+Get the active collection name.
+
+```python
+name = engine.collection_name
+print(f"Using collection: {name}")
+```
+
 ---
 
 ## Document Operations
@@ -139,20 +157,18 @@ Create multiple documents in batch.
 ```python
 bulk_create(
     docs: List[str | Dict | VectorDocument],
-    batch_size: int = None,
+    batch_size: int = 100,
     ignore_conflicts: bool = False,
-    update_conflicts: bool = False,
-    update_fields: List[str] = None
+    update_conflicts: bool = False
 ) -> List[VectorDocument]
 ```
 
 **Parameters:**
 
 - `docs`: List of documents to create
-- `batch_size`: Number of documents per batch (backend-specific default)
+- `batch_size`: Number of documents per batch (default: 100)
 - `ignore_conflicts`: Skip documents with conflicting IDs
 - `update_conflicts`: Update existing documents on ID conflict
-- `update_fields`: Fields to update on conflict (None = all fields)
 
 **Returns:** List of created `VectorDocument` instances
 
@@ -231,16 +247,16 @@ Update multiple documents in batch.
 ```python
 bulk_update(
     docs: List[Dict | VectorDocument],
-    batch_size: int = None,
-    update_fields: List[str] = None
+    batch_size: int = 100,
+    ignore_conflicts: bool = False
 ) -> List[VectorDocument]
 ```
 
 **Parameters:**
 
 - `docs`: List of documents to update (must include ID)
-- `batch_size`: Number of documents per batch
-- `update_fields`: Specific fields to update (None = all)
+- `batch_size`: Number of documents per batch (default: 100)
+- `ignore_conflicts`: Skip documents that don't exist instead of raising error
 
 **Returns:** List of updated `VectorDocument` instances
 
@@ -421,12 +437,12 @@ doc, created = engine.update_or_create(
 Delete documents by ID.
 
 ```python
-delete(ids: str | List[str]) -> int
+delete(*ids) -> int
 ```
 
 **Parameters:**
 
-- `ids`: Single ID or list of IDs to delete
+- `*ids`: One or more document IDs to delete
 
 **Returns:** Number of documents deleted
 
@@ -534,49 +550,98 @@ print(f"Total documents: {total}")
 Delete the entire collection.
 
 ```python
-drop_collection(collection_name: str) -> bool
+drop_collection(collection_name: str = None) -> bool
 ```
 
 **Parameters:**
 
-- `collection_name`: Name of collection to drop
+- `collection_name`: Name of collection to drop (defaults to active collection)
 
 **Returns:** True if successful
 
 **Warning:** This permanently deletes all documents in the collection.
 
-**Example:**
+**Examples:**
 
 ```python
+# Drop specific collection
 engine.drop_collection("old_collection")
+
+# Drop active collection
+engine.drop_collection()
 ```
 
 ---
 
-### clear_collection()
+### add_collection()
 
-Delete all documents from the collection (keep collection structure).
+Create a new collection.
 
 ```python
-clear_collection() -> int
+add_collection(collection_name: str, dimension: int, metric: str = "cosine") -> None
 ```
 
-**Returns:** Number of documents deleted
+**Parameters:**
 
-**Warning:** This permanently deletes all documents.
+- `collection_name`: Name for the new collection
+- `dimension`: Vector dimension
+- `metric`: Distance metric ("cosine", "euclidean", "dot_product")
 
 **Example:**
 
 ```python
-deleted = engine.clear_collection()
-print(f"Deleted {deleted} documents")
+engine.add_collection("new_collection", dimension=1536, metric="cosine")
+```
+
+---
+
+### get_collection()
+
+Get an existing collection.
+
+```python
+get_collection(collection_name: str = None) -> Any
+```
+
+**Parameters:**
+
+- `collection_name`: Name of collection (defaults to active collection)
+
+**Returns:** Collection object/handle
+
+**Example:**
+
+```python
+collection = engine.get_collection("my_collection")
+```
+
+---
+
+### get_or_create_collection()
+
+Get existing collection or create if it doesn't exist.
+
+```python
+get_or_create_collection(collection_name: str, dimension: int, metric: str = "cosine") -> Any
+```
+
+**Parameters:**
+
+- `collection_name`: Name of collection
+- `dimension`: Vector dimension
+- `metric`: Distance metric
+
+**Returns:** Collection object/handle
+
+**Example:**
+
+```python
+collection = engine.get_or_create_collection("docs", dimension=1536)
 ```
 
 ---
 
 ## Query DSL
-
-### Q Objects
 
 Composable query filters.
 
@@ -782,17 +847,13 @@ VectorDocument.from_any(input_data)  # Auto-detect format
 ## Type Definitions
 
 ```python
-from crossvector.types import Doc, DocId, DocIds
+from crossvector.types import Doc
 
-# Doc: Flexible document input
+# Doc: Flexible document input for create/update operations
 Doc = Union[str, Dict[str, Any], VectorDocument]
-
-# DocId: Single document ID
-DocId = Union[str, int]
-
-# DocIds: Single or multiple document IDs
-DocIds = Union[DocId, List[DocId]]
 ```
+
+Common type for document operations. The engine automatically handles conversion between string, dict, and VectorDocument formats.
 
 ---
 

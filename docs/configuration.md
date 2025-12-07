@@ -46,7 +46,7 @@ PGVECTOR_PASSWORD=postgres
 
 # Vector Settings
 VECTOR_METRIC=cosine
-VECTOR_STORE_TEXT=true
+VECTOR_STORE_TEXT=false
 VECTOR_DIM=1536
 VECTOR_SEARCH_LIMIT=10
 
@@ -82,8 +82,9 @@ GEMINI_API_KEY=AI...               # Required: Your Gemini API key
 
 Supported models (defaults to `gemini-embedding-001`):
 
-- `gemini-embedding-001` (768-3072 dims, recommended)
-- `text-embedding-005` (768 dims)
+- `gemini-embedding-001` (768-3072 dims, unified state-of-the-art model, recommended)
+- `text-embedding-005` (768 dims, English/code specialist, legacy)
+- `text-multilingual-embedding-002` (768 dims, multilingual specialist, legacy)
 - `text-embedding-004` (768 dims, legacy)
 
 #### Shared Embedding Model (Optional)
@@ -145,7 +146,7 @@ ChromaDB adapter uses strict configuration validation with this priority:
 **Important:** Cannot set both `CHROMA_HOST` and `CHROMA_PERSIST_DIR` simultaneously. This will raise `MissingConfigError` with a helpful message explaining the conflict.
 
 ```python
-# ✅ Valid configurations:
+# Valid configurations:
 # Cloud only
 CHROMA_API_KEY="..."
 
@@ -155,7 +156,7 @@ CHROMA_HOST="localhost"
 # Local only
 CHROMA_PERSIST_DIR="./data"
 
-# ❌ Invalid - raises MissingConfigError:
+# Invalid - raises MissingConfigError:
 CHROMA_HOST="localhost"
 CHROMA_PERSIST_DIR="./data"  # Conflict!
 ```
@@ -192,8 +193,8 @@ PGVECTOR_PASSWORD=postgres  # Optional: Default postgres
 VECTOR_METRIC=cosine
 # Options: cosine, euclidean, dot_product
 
-# Whether to store original text with vectors
-VECTOR_STORE_TEXT=true
+# Whether to store original text with vectors (default: false)
+VECTOR_STORE_TEXT=false
 # Options: true, false
 
 # Default embedding dimension (informational)

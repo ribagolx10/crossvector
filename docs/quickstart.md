@@ -2,7 +2,7 @@
 
 Get started with CrossVector in 5 minutes.
 
-> 💡 **Recommended**: This guide uses **Gemini** (free tier, faster). For OpenAI, see [alternative setup](#using-openai-instead).
+> **Recommended**: This guide uses **Gemini** (free tier, faster). For OpenAI, see [alternative setup](#using-openai-instead).
 
 ## Prerequisites
 
@@ -428,8 +428,8 @@ engine = VectorEngine(
 ```python
 from crossvector.exceptions import (
     MissingConfigError,
-    DocumentNotFoundError,
-    CollectionNotFoundError
+    DoesNotExist,
+    MultipleObjectsReturned
 )
 
 try:
@@ -442,12 +442,17 @@ try:
     )
 except MissingConfigError as e:
     print(f"Configuration error: {e}")
-    print(f"Hint: {e.hint}")  # Helpful resolution guidance
+    print(f"Hint: {e.details.get('hint', 'N/A')}")
 
 try:
     doc = engine.get(id="nonexistent-id")
-except DocumentNotFoundError as e:
-    print(f"Document not found: {e.document_id}")
+except DoesNotExist as e:
+    print(f"Document not found: {e.message}")
+
+try:
+    doc = engine.get(status="active")  # Multiple matches
+except MultipleObjectsReturned as e:
+    print(f"Multiple documents found: {e.message}")
 ```
 
 ## Using OpenAI Instead
@@ -482,15 +487,19 @@ engine = VectorEngine(
 # Rest of the code is identical
 ```
 
-**OpenAI Models:**
-- `text-embedding-3-small` (1536 dims, default)
-- `text-embedding-3-large` (3072 dims)
+**Embedding Models Comparison:**
 
-**Trade-offs:**
-- ✅ Slightly higher accuracy for some use cases
-- ✅ Larger vectors (1536 vs 768 dims)
-- ❌ Requires paid API key
-- ❌ 1.5x slower search than Gemini
+| Model | Provider | Dimensions | Cost | Speed |
+|-------|----------|-----------|------|-------|
+| `gemini-embedding-001` | Gemini | 768-3072 (configurable) | Free | Fast |
+| `text-embedding-3-small` | OpenAI | 1536 | Paid | Slightly slower |
+| `text-embedding-3-large` | OpenAI | 3072 | Paid | Slower |
+
+**Recommendation:**
+
+- **Start with Gemini** (free tier, fast, good quality)
+- **Use OpenAI** if you need higher accuracy for specific use cases
+- **Configure dimensions** with `gemini-embedding-001`: 768, 1536, or 3072 dims
 
 ---
 

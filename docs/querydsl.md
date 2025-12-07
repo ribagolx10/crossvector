@@ -68,10 +68,10 @@ Q(config__settings__enabled=True)
 
 | Backend | Nested Metadata |
 |---------|-----------------|
-| AstraDB | ✅ Full support |
-| PgVector | ✅ Full support |
-| Milvus | ✅ Full support |
-| ChromaDB | ❌ Flattened (auto-converted) |
+| AstraDB | Full support |
+| PgVector | Full support |
+| Milvus | Full support |
+| ChromaDB | Via dot notation |
 
 ---
 
@@ -79,25 +79,30 @@ Q(config__settings__enabled=True)
 
 CrossVector supports 8 universal operators that work across all backends:
 
-### Equality Operators
+### Field Operators
 
-#### `eq` - Equal
+These 8 operators work on field values and are compiled to backend-specific syntax:
 
-```python
-# Explicit
-Q(status__eq="active")
+| Operator | Usage | Example |
+|----------|-------|---------|
+| `eq` | Equal | `Q(status="active")` or `Q(status__eq="active")` |
+| `ne` | Not equal | `Q(status__ne="deleted")` |
+| `gt` | Greater than | `Q(score__gt=0.8)` |
+| `gte` | Greater than or equal | `Q(score__gte=0.8)` |
+| `lt` | Less than | `Q(price__lt=100)` |
+| `lte` | Less than or equal | `Q(stock__lte=10)` |
+| `in` | In array | `Q(status__in=["active", "pending"])` |
+| `nin` | Not in array | `Q(status__nin=["deleted", "banned"])` |
 
-# Implicit (default)
-Q(status="active")
-```
+### Boolean Operators
 
-**Filter format:** `{"status": {"$eq": "active"}}`
+These are used to combine Q objects (not field operators):
 
-#### `ne` - Not Equal
-
-```python
-Q(status__ne="deleted")
-```
+| Operator | Symbol | Example |
+|----------|--------|---------|
+| AND | `&` | `Q(category="tech") & Q(level="beginner")` |
+| OR | `\|` | `Q(featured=True) \| Q(score__gte=0.9)` |
+| NOT | `~` | `~Q(archived=True)` |
 
 **Filter format:** `{"status": {"$ne": "deleted"}}`
 
@@ -142,10 +147,6 @@ Q(temperature__lte=30)
 ```
 
 **Filter format:** `{"stock": {"$lte": 10}}`
-
----
-
-### Membership Operators
 
 #### `in` - In Array
 
@@ -251,19 +252,16 @@ results = engine.search(
 Some backends support filtering without vector search:
 
 ```python
-# AstraDB, PgVector, ChromaDB support
+# AstraDB, PgVector, ChromaDB, Milvus support metadata-only search
 results = engine.search(
     query=None,  # No vector search
     where=Q(status="published") & Q(category="tech"),
     limit=50
 )
 
-# Milvus requires vector
+# Always check backend support
 if engine.supports_metadata_only:
     results = engine.search(query=None, where={"status": {"$eq": "active"}})
-else:
-    # Provide dummy query for Milvus
-    results = engine.search("", where={"status": {"$eq": "active"}})
 ```
 
 ### Get Document with Filters
@@ -505,10 +503,10 @@ except InvalidFieldError as e:
 
 ```python
 # Correct: numeric comparison with number
-Q(score__gt=0.8)  # ✅
+Q(score__gt=0.8)
 
 # Incorrect: numeric comparison with string (backend-dependent)
-Q(score__gt="0.8")  # ⚠️ May fail on some backends
+Q(score__gt="0.8")  # May fail on some backends
 ```
 
 **Best Practice:** Use correct types for comparisons:
@@ -531,13 +529,13 @@ Q(featured=True, archived=False)
 ### Index-Friendly Queries
 
 ```python
-# ✅ Good: Simple equality on indexed field
+# Good: Simple equality on indexed field
 Q(category="tech")
 
-# ✅ Good: Range on indexed numeric field
+# Good: Range on indexed numeric field
 Q(created_at__gte=timestamp)
 
-# ⚠️ Slower: Complex nested queries
+# Slower: Complex nested queries
 Q(user__profile__settings__theme="dark")
 ```
 

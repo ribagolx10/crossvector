@@ -209,25 +209,30 @@ doc = VectorDocument.from_any(existing_doc)
 
 #### `to_vector()`
 
-Extract vector as list or numpy array.
+Extract vector in various formats.
 
 ```python
 to_vector(
-    require: bool = True,
-    output_format: str = "list"
-) -> List[float] | np.ndarray | None
+    require: bool = False,
+    output_format: Literal["dict", "json", "str", "list"] = "list"
+) -> Any
 ```
 
 **Parameters:**
 
 - `require`: Raise error if vector missing
-- `output_format`: `"list"` or `"numpy"`
+- `output_format`: Desired format:
+  - `"list"` (default): Python list of floats
+  - `"dict"`: `{"vector": [...]}` wrapper
+  - `"json"`: JSON string representation
+  - `"str"`: String representation
 
 **Examples:**
 
 ```python
-vector = doc.to_vector()  # List[float]
-vector = doc.to_vector(output_format="numpy")  # np.ndarray
+vector = doc.to_vector()  # [0.1, 0.2, ...]
+vector = doc.to_vector(output_format="dict")  # {"vector": [0.1, 0.2, ...]}
+vector = doc.to_vector(output_format="json")  # '[0.1, 0.2, ...]'
 vector = doc.to_vector(require=False)  # None if missing
 ```
 
@@ -307,11 +312,11 @@ metadata = {
 ### Nested Metadata (Backend Support)
 
 | Backend | Nested Support | Query Format |
-|---------|----------------|--------------|
-| AstraDB | ✅ Full | `{"user.role": {"$eq": "admin"}}` |
-| PgVector | ✅ Full | `{"user.role": {"$eq": "admin"}}` |
-| ChromaDB | ❌ Flattened | `{"user.role": {"$eq": "admin"}}` (auto-flattened) |
-| Milvus | ✅ Full | `{"user.role": {"$eq": "admin"}}` |
+|---------|----------------|---|
+| AstraDB | Full | `{"user.role": {"$eq": "admin"}}` |
+| PgVector | Full | `{"user.role": {"$eq": "admin"}}` |
+| ChromaDB | Via dot notation | `{"user.role": {"$eq": "admin"}}` (auto-flattened) |
+| Milvus | Full | `{"user.role": {"$eq": "admin"}}` |
 
 **Example with nested metadata:**
 
@@ -400,7 +405,7 @@ Generate UUID v4 strings.
 ```python
 from crossvector.settings import CrossVectorSettings
 
-settings = CrossVectorSettings(PK_STRATEGY="uuid")
+settings = CrossVectorSettings(PRIMARY_KEY_MODE="uuid")
 # Generated IDs: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 ```
 
@@ -409,7 +414,7 @@ settings = CrossVectorSettings(PK_STRATEGY="uuid")
 Hash document text using SHA256.
 
 ```python
-settings = CrossVectorSettings(PK_STRATEGY="hash_text")
+settings = CrossVectorSettings(PRIMARY_KEY_MODE="hash_text")
 # Generated IDs: "5f4dcc3b5aa765d61d8327deb882cf99"
 
 doc = engine.create("Hello world")
@@ -423,7 +428,7 @@ doc = engine.create("Hello world")
 Hash embedding vector using SHA256.
 
 ```python
-settings = CrossVectorSettings(PK_STRATEGY="hash_vector")
+settings = CrossVectorSettings(PRIMARY_KEY_MODE="hash_vector")
 # Generated IDs: "7b8e4d2a9c1f3e5d6a0b4c8e2f7d9a1b"
 
 doc = engine.create(vector=[0.1, 0.2, ...])
@@ -435,7 +440,7 @@ doc = engine.create(vector=[0.1, 0.2, ...])
 Generate random 64-bit integers.
 
 ```python
-settings = CrossVectorSettings(PK_STRATEGY="int64")
+settings = CrossVectorSettings(PRIMARY_KEY_MODE="int64")
 # Generated IDs: 7234567890123456789
 ```
 
@@ -444,7 +449,7 @@ settings = CrossVectorSettings(PK_STRATEGY="int64")
 Use backend's native auto-generation (if supported).
 
 ```python
-settings = CrossVectorSettings(PK_STRATEGY="auto")
+settings = CrossVectorSettings(PRIMARY_KEY_MODE="auto")
 # Backend-specific ID generation
 ```
 
@@ -460,7 +465,7 @@ def my_id_factory() -> str:
     return f"doc-{int(time.time())}"
 
 settings = CrossVectorSettings(
-    PK_STRATEGY="custom",
+    PRIMARY_KEY_MODE="custom",
     PK_FACTORY=my_id_factory
 )
 

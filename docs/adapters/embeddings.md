@@ -8,13 +8,14 @@ CrossVector supports multiple embedding providers, with **Google Gemini** recomm
 
 ### Comparison Matrix
 
-| Feature | 🥇 Google Gemini | 🥈 OpenAI |
+| Feature | Google Gemini | OpenAI |
 |---------|-----------------|-----------|
-| **Best For** | **Free tier & Speed** | Quality & Ecosystem |
-| **Free Tier** | ✅ **1,500 RPM (Generous)** | ❌ No (Paid only) |
-| **Search Speed** | ⚡ **Fast (~200ms)** | ⚡ Fast (~400ms) |
-| **Storage** | 📉 **Small (768 dims)** | 📈 Large (1536 dims) |
-| **Models** | `text-embedding-004` | `text-embedding-3-small` |
+| **Best For** | Free tier & Speed | Quality & Ecosystem |
+| **Free Tier** | 1,500 RPM (Generous) | No (Paid only) |
+| **Default Model** | `models/text-embedding-004` (768 dims) | `text-embedding-3-small` (1536 dims) |
+| **Custom Dimensions** | Yes (models/gemini-embedding-001: 768, 1536, 3072) | No (fixed per model) |
+| **Search Speed** | Fast (~200ms) | Fast (~400ms) |
+| **Storage** | Small (768 dims default) | Large (1536+ dims) |
 | **Max Tokens** | 2,048 | 8,191 |
 | **Cost** | Free / Low | $0.02 / 1M tokens |
 
@@ -26,10 +27,11 @@ Google's state-of-the-art embedding models via Gemini API.
 
 ### Why Gemini?
 
-- ✅ **Free Tier**: Up to 1,500 requests/minute for free.
-- ✅ **Faster**: 1.5x faster search latency than OpenAI.
-- ✅ **Storage Efficient**: 768 dimensions require 50% less storage than 1536.
-- ✅ **Quality**: Excellent performance for search and retrieval.
+- **Free Tier**: Up to 1,500 requests/minute for free.
+- **Faster**: 1.5x faster search latency than OpenAI.
+- **Storage Efficient**: Default 768 dimensions (50% smaller than OpenAI's 1536).
+- **Flexible**: Optional 1536 or 3072 dimensions if needed (models/gemini-embedding-001).
+- **Quality**: Excellent performance for search and retrieval tasks.
 
 ### Installation
 
@@ -61,46 +63,47 @@ embedding = GeminiEmbeddingAdapter(model_name="models/embedding-001")
 
 ### Available Models
 
-#### models/text-embedding-004 (Default)
+#### models/text-embedding-004 (Default - Latest)
 
-Latest generation model, balanced for performance and quality.
+Latest Gemini embedding model, state-of-the-art performance.
 
-- **Dimensions:** 768
+- **Dimensions:** 768 (default)
 - **Max tokens:** 2,048
-- **Best for:** Most search and RAG applications.
+- **Best for:** Most search, RAG, and semantic matching applications
+- **Performance:** Fast, balanced quality
 
 ```python
 embedding = GeminiEmbeddingAdapter(model_name="models/text-embedding-004")
 ```
 
-#### models/embedding-001
+#### models/gemini-embedding-001
 
-Previous generation, widely supported.
+State-of-the-art with flexible dimensions.
 
-- **Dimensions:** 768
+- **Dimensions:** 1536 (default), supports 768 or 3072
 - **Max tokens:** 2,048
-- **Task Types:** Supports specific task optimization.
+- **Best for:** Applications needing custom embedding dimensions
+- **Quality:** Excellent across multilingual and code tasks
 
 ```python
+# Default 1536 dimensions
+embedding = GeminiEmbeddingAdapter(model_name="models/gemini-embedding-001")
+
+# Custom dimensions
 embedding = GeminiEmbeddingAdapter(
-    model_name="models/embedding-001",
-    task_type="retrieval_document"
+    model_name="models/gemini-embedding-001",
+    dim=768  # 768, 1536, or 3072
 )
 ```
 
-### Task Types
+#### Legacy Models
 
-Optimize embeddings for specific use cases (supported by `embedding-001`):
+- `models/text-embedding-005`: English and code (768 dims)
+- `models/text-multilingual-embedding-002`: Multilingual (768 dims)
+- `models/text-embedding-004`: Previous generation (768 dims)
 
 ```python
-# For storing documents
-embedding = GeminiEmbeddingAdapter(task_type="RETRIEVAL_DOCUMENT")
-
-# For search queries
-embedding = GeminiEmbeddingAdapter(task_type="RETRIEVAL_QUERY")
-
-# For semantic similarity
-embedding = GeminiEmbeddingAdapter(task_type="SEMANTIC_SIMILARITY")
+embedding = GeminiEmbeddingAdapter(model_name="models/text-embedding-005")
 ```
 
 ### Usage Examples
@@ -112,16 +115,26 @@ from crossvector import VectorEngine
 from crossvector.embeddings.gemini import GeminiEmbeddingAdapter
 from crossvector.dbs.pgvector import PgVectorAdapter
 
-# Initialize with Gemini
+# Initialize with Gemini (default: models/text-embedding-004, 768 dims)
 engine = VectorEngine(
     db=PgVectorAdapter(),
     embedding=GeminiEmbeddingAdapter(),
     collection_name="documents"
 )
 
-# Embeddings generated automatically
+# Embeddings generated automatically (768 dims)
 doc = engine.create("Gemini embeddings are fast!")
 print(len(doc.vector))  # 768
+
+# Or use gemini-embedding-001 with custom dimensions
+engine = VectorEngine(
+    db=PgVectorAdapter(),
+    embedding=GeminiEmbeddingAdapter(
+        model_name="models/gemini-embedding-001",
+        dim=1536  # 768, 1536, or 3072
+    ),
+    collection_name="documents"
+)
 ```
 
 #### Batch Processing
@@ -143,9 +156,9 @@ OpenAI's industry-standard embedding models.
 
 ### When to use OpenAI?
 
-- ✅ **Long Documents**: Supports up to 8,191 tokens per text.
-- ✅ **High Dimensions**: Need 1536 or 3072 dimensions.
-- ✅ **Ecosystem**: Already using OpenAI for LLMs.
+- **Long Documents**: Supports up to 8,191 tokens per text.
+- **High Dimensions**: Need 1536 or 3072 dimensions.
+- **Ecosystem**: Already using OpenAI for LLMs.
 
 ### Installation
 
@@ -222,17 +235,28 @@ You can implement your own adapter for any provider (HuggingFace, Cohere, etc.):
 
 ```python
 from crossvector.abc import EmbeddingAdapter
-from typing import List
+from typing import List, Optional
 
 class CustomEmbeddingAdapter(EmbeddingAdapter):
-    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
-        # Your custom logic here
-        return [[0.1, 0.2] for _ in texts]
+    def __init__(self, model_name: str = "custom-model", dim: int = 384):
+        super().__init__(model_name=model_name, dim=dim)
+        # Your initialization logic
 
-    @property
-    def dimensions(self) -> int:
-        return 2  # Return actual dimensions
+    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings for texts."""
+        # Your custom embedding logic here
+        # Must return list of vectors with length = self.dim
+        return [[0.1, 0.2, ...] for _ in texts]
+
+# Use your custom adapter
+embedding = CustomEmbeddingAdapter(dim=384)
+engine = VectorEngine(db=..., embedding=embedding)
 ```
+
+**Important:** Your adapter must:
+- Inherit from `EmbeddingAdapter`
+- Implement `get_embeddings(texts: List[str]) -> List[List[float]]`
+- Set `dim` to match the vector dimension your model produces
 
 ---
 
@@ -241,13 +265,17 @@ class CustomEmbeddingAdapter(EmbeddingAdapter):
 Handle embedding errors gracefully:
 
 ```python
-from crossvector.exceptions import EmbeddingError
+from crossvector.exceptions import SearchError, MissingConfigError
 
 try:
-    embedding.get_embeddings(["text"])
-except EmbeddingError as e:
+    embedding = GeminiEmbeddingAdapter()
+    vectors = embedding.get_embeddings(["text"])
+except MissingConfigError as e:
+    print(f"Missing configuration: {e.details['config_key']}")
+    print(f"Hint: {e.details['hint']}")
+except SearchError as e:
     print(f"Embedding failed: {e.message}")
-    if "quota" in str(e).lower():
+    if "rate" in str(e).lower():
         print("Rate limit exceeded!")
 ```
 

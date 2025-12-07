@@ -30,16 +30,22 @@ python scripts/benchmark.py --backends pgvector milvus --embedding-providers ope
 python scripts/benchmark.py [OPTIONS]
 
 Options:
-  --num-docs INT               Number of documents to test (default: 1000)
-  --backends NAME [NAME ...]   Specific backends: pgvector, astradb, milvus, chroma
-  --embedding-providers NAME   Embedding providers: openai, gemini
-  --output PATH               Output file path (default: benchmark.md)
+  --num-docs INT                    Number of documents to test (default: 1000)
+  --backends NAME [NAME ...]        Specific backends: pgvector, astradb, milvus, chroma
+  --embedding-providers NAME        Embedding providers: openai, gemini
+  --skip-slow                       Skip slow cloud backends (astradb, milvus) for faster testing
+  --search-limit INT                Number of results to return in search operations (default: 100)
+  --collection-name STR             Custom collection name (default: auto-generate with UUID8)
+  --timeout INT                     Timeout per backend test in seconds (default: 60)
+  --output PATH                     Output file path (default: benchmark.md)
+  --use-fixtures PATH               Path to pre-generated fixtures JSON file
+  --add-vectors                     Generate and add vectors to fixture documents
 ```
 
 ## What Gets Measured
 
-### 1. Bulk Create Performance
-Measures throughput for batch document insertion with automatic embedding generation.
+### 1. Upsert Performance
+Measures throughput for batch document upsert with automatic embedding generation.
 
 **Metrics:**
 - Duration (seconds)
@@ -203,14 +209,14 @@ Results are saved as a markdown file (default: `benchmark.md`) with:
 
 | Backend | Embedding | Model | Dim | Upsert | Search (avg) | Update (avg) | Delete (batch) | Status |
 |---------|-----------|-------|-----|--------|--------------|--------------|----------------|--------|
-| pgvector | openai | text-embedding-3-small | 1536 | 7.06s | 21.26ms | 6.21ms | 22.63ms | ✅ |
-| astradb | openai | text-embedding-3-small | 1536 | 18.89s | 23.86s | 1.11s | 15.15s | ✅ |
-| milvus | openai | text-embedding-3-small | 1536 | 7.94s | 654.43ms | 569.52ms | 2.17s | ✅ |
-| chroma | openai | text-embedding-3-small | 1536 | 17.08s | 654.76ms | 1.23s | 4.73s | ✅ |
-| pgvector | gemini | models/gemini-embedding-001 | 1536 | 6.65s | 18.72ms | 6.40ms | 20.25ms | ✅ |
-| astradb | gemini | models/gemini-embedding-001 | 1536 | 11.25s | 6.71s | 903.37ms | 15.05s | ✅ |
-| milvus | gemini | models/gemini-embedding-001 | 1536 | 6.14s | 571.90ms | 561.38ms | 1.91s | ✅ |
-| chroma | gemini | models/gemini-embedding-001 | 1536 | 18.93s | 417.28ms | 1.24s | 4.63s | ✅ |
+| pgvector | openai | text-embedding-3-small | 1536 | 7.06s | 21.26ms | 6.21ms | 22.63ms | OK |
+| astradb | openai | text-embedding-3-small | 1536 | 18.89s | 23.86s | 1.11s | 15.15s | OK |
+| milvus | openai | text-embedding-3-small | 1536 | 7.94s | 654.43ms | 569.52ms | 2.17s | OK |
+| chroma | openai | text-embedding-3-small | 1536 | 17.08s | 654.76ms | 1.23s | 4.73s | OK |
+| pgvector | gemini | models/gemini-embedding-001 | 1536 | 6.65s | 18.72ms | 6.40ms | 20.25ms | OK |
+| astradb | gemini | models/gemini-embedding-001 | 1536 | 11.25s | 6.71s | 903.37ms | 15.05s | OK |
+| milvus | gemini | models/gemini-embedding-001 | 1536 | 6.14s | 571.90ms | 561.38ms | 1.91s | OK |
+| chroma | gemini | models/gemini-embedding-001 | 1536 | 18.93s | 417.28ms | 1.24s | 4.63s | OK |
 ```
 
 ### Interpreting Metrics
@@ -281,7 +287,7 @@ Or use a markdown diff tool for better visualization.
 
 If you see:
 ```
-⚠️  AstraDB not available: Missing ASTRADB_API_ENDPOINT
+AstraDB not available: Missing ASTRADB_API_ENDPOINT
 ```
 
 Solution: Set the required environment variables or the backend will be skipped.
@@ -290,7 +296,7 @@ Solution: Set the required environment variables or the backend will be skipped.
 
 If you see rate limit errors:
 ```
-❌ bulk_create failed: Rate limit exceeded
+bulk_create failed: Rate limit exceeded
 ```
 
 Solutions:
@@ -330,7 +336,7 @@ Extend `benchmark_backend()` method to add custom metrics:
 # After existing benchmarks, add:
 
 # Custom metric
-print(f"\n7️⃣  Custom Metric...")
+print("\nCustom Metric...")
 duration, result = benchmark_operation("custom", lambda: engine.custom_operation())
 results["custom_metric"] = {"duration": duration}
 ```
@@ -392,4 +398,4 @@ python scripts/benchmark.py --backends milvus --num-docs 5000
 
 ## Contributing
 
-Found a performance issue or want to add a new benchmark metric? See [Contributing Guide](contributing.md#performance-testing).
+Found a performance issue or want to add a new benchmark metric? See [Contributing Guide](contributing.md#benchmarking).

@@ -24,6 +24,36 @@ Usage:
 
     # Custom output file
     python scripts/benchmark.py --output results/my_benchmark.md
+
+IMPORTANT NOTES ON BENCHMARK RESULTS:
+=====================================
+
+Results vary significantly based on deployment environment:
+
+1. **PgVector**: Benchmarks are run against LOCAL PostgreSQL instance
+   - Provides optimal latency and consistent performance
+   - Results NOT comparable with cloud-hosted PgVector
+   - For fair comparison: deploy PgVector in same region/network as cloud backends
+
+2. **Cloud Backends** (AstraDB, Milvus, ChromaDB): Results affected by:
+   - Network latency and geographic region
+   - Regional proximity between client and server
+   - Network conditions and bandwidth availability
+   - Server load and resource allocation
+
+3. **For Fair Comparison**:
+   - Run benchmarks in your actual production environment
+   - Ensure all backends deployed in same region
+   - Use consistent network conditions across all backends
+   - Account for network latency when interpreting results
+
+4. **Embedding Providers**: API-based providers (OpenAI, Gemini)
+   - API call latency included in embedding generation time
+   - Batch sizes and rate limits affect overall performance
+   - Static vectors used during benchmark (skip embedding API calls for DB isolation)
+
+RECOMMENDATION: Conduct benchmarks in YOUR production environment with real network
+conditions to get accurate, meaningful results for your specific use case.
 """
 
 import argparse
@@ -170,18 +200,18 @@ def load_fixtures_from_file(
 
     # Generate and add vectors if requested and documents lack them
     if add_vectors and not has_vectors:
-        print(f"📊 Generating vectors for {len(documents)} documents...")
+        print(f"Generating vectors for {len(documents)} documents...")
         generated_vectors = generate_fixture_vectors(len(documents))
         for i, doc in enumerate(documents):
             doc["vector"] = generated_vectors[i]
         has_vectors = True
-        print("✅ Added vectors to all documents")
-    print(f"✅ Loaded {len(documents)} documents from {fixtures_path}")
+        print("Added vectors to all documents")
+    print(f"Loaded {len(documents)} documents from {fixtures_path}")
     if has_vectors:
-        print("   ✓ Documents include pre-computed vectors")
+        print("Documents include pre-computed vectors")
     else:
         print("   ℹ️  Documents will need vectors computed during benchmark")
-    print(f"✅ Loaded {len(queries)} search queries from {fixtures_path}")
+    print(f"Loaded {len(queries)} search queries from {fixtures_path}")
 
     return documents, queries
 
@@ -207,7 +237,7 @@ def benchmark_operation(name: str, operation: callable) -> Tuple[float, Any]:
         return duration, result
     except Exception as e:
         duration = time.time() - start
-        print(f"  ❌ {name} failed: {e}")
+        print(f"{name} failed: {e}")
         return duration, None
 
 
@@ -334,7 +364,7 @@ class BenchmarkRunner:
 
             return OpenAIEmbeddingAdapter(model_name="text-embedding-3-small")
         except Exception as e:
-            print(f"  ⚠️  OpenAI embedding not available: {e}")
+            print(f"OpenAI embedding not available: {e}")
             return None
 
     def _init_gemini_embedding(self) -> Optional[Any]:
@@ -345,7 +375,7 @@ class BenchmarkRunner:
             # Use 1536 dimensions to match OpenAI for fair comparison
             return GeminiEmbeddingAdapter(model_name="gemini-embedding-001", dim=1536)
         except Exception as e:
-            print(f"  ⚠️  Gemini embedding not available: {e}")
+            print(f"Gemini embedding not available: {e}")
             return None
 
     def _init_pgvector(self, embedding: Any, collection_name: str = None) -> Optional[VectorEngine]:
@@ -360,7 +390,7 @@ class BenchmarkRunner:
                 store_text=True,
             )
         except (ImportError, MissingConfigError) as e:
-            print(f"  ⚠️  PgVector not available: {e}")
+            print(f"PgVector not available: {e}")
             return None
 
     def _init_astradb(self, embedding: Any, collection_name: str = None) -> Optional[VectorEngine]:
@@ -375,7 +405,7 @@ class BenchmarkRunner:
                 store_text=True,
             )
         except (ImportError, MissingConfigError) as e:
-            print(f"  ⚠️  AstraDB not available: {e}")
+            print(f"AstraDB not available: {e}")
             return None
 
     def _init_milvus(self, embedding: Any, collection_name: str = None) -> Optional[VectorEngine]:
@@ -390,7 +420,7 @@ class BenchmarkRunner:
                 store_text=True,
             )
         except (ImportError, MissingConfigError) as e:
-            print(f"  ⚠️  Milvus not available: {e}")
+            print(f"Milvus not available: {e}")
             return None
 
     def _init_chroma(self, embedding: Any, collection_name: str = None) -> Optional[VectorEngine]:
@@ -405,7 +435,7 @@ class BenchmarkRunner:
                 store_text=True,
             )
         except (ImportError, MissingConfigError) as e:
-            print(f"  ⚠️  ChromaDB not available: {e}")
+            print(f"ChromaDB not available: {e}")
             return None
 
     def cleanup_collection(self, engine: VectorEngine, backend_name: str, collection_name: str = None) -> None:
@@ -413,9 +443,9 @@ class BenchmarkRunner:
         try:
             engine.drop_collection(collection_name or "benchmark_test")
             time.sleep(0.1)
-            print(f"  🧹 Cleaned up {backend_name} collection")
+            print(f"Cleaned up {backend_name} collection")
         except Exception as e:
-            print(f"  ⚠️  Cleanup warning for {backend_name}: {e}")
+            print(f"Cleanup warning for {backend_name}: {e}")
 
     def benchmark_backend(
         self,
@@ -440,7 +470,7 @@ class BenchmarkRunner:
             Dictionary with benchmark results
         """
         print(f"\n{'=' * 60}")
-        print(f"🔥 Benchmarking: {backend_name.upper()} + {embedding_name.upper()}")
+        print(f"Benchmarking: {backend_name.upper()} + {embedding_name.upper()}")
         print(f"{'=' * 60}")
 
         # Initialize engine
@@ -479,15 +509,15 @@ class BenchmarkRunner:
             # Use pre-generated documents with vectors (computed once globally)
             # Skip duplicate generation if pre_docs provided
             if not pre_docs:
-                print(f"\n📝 Generating {self.num_docs} test documents...")
+                print(f"\nGenerating {self.num_docs} test documents...")
                 test_docs = generate_documents(self.num_docs)
                 self._precompute_doc_embeddings(test_docs, embedding)
             else:
                 test_docs = pre_docs.copy()
-                print(f"\n✅ Using pre-generated {self.num_docs} documents (static vectors already attached)")
+                print(f"Using pre-generated {self.num_docs} documents (static vectors already attached)")
 
             # 1. Bulk Create Performance
-            print(f"\n1️⃣  Upsert ({self.num_docs} docs)...")
+            print(f"\nUpsert ({self.num_docs} docs)...")
             # Use conservative batch_size to satisfy provider limits (e.g., Chroma max batch 1000)
             duration, upserted_docs = benchmark_operation("upsert", lambda: engine.upsert(test_docs, batch_size=100))
             results["upsert"] = {
@@ -495,12 +525,12 @@ class BenchmarkRunner:
                 "docs_per_sec": self.num_docs / duration if duration > 0 else 0,
                 "success": upserted_docs is not None,
             }
-            print(f"   ✅ Duration: {format_duration(duration)}")
-            print(f"   📊 {results['upsert']['docs_per_sec']:.2f} docs/sec")
+            print(f"Duration: {format_duration(duration)}")
+            print(f"{results['upsert']['docs_per_sec']:.2f} docs/sec")
 
             # 2. Individual Create Performance (small sample)
             sample_size = min(10, self.num_docs)
-            print(f"\n2️⃣  Individual Create ({sample_size} docs)...")
+            print(f"\nIndividual Create ({sample_size} docs)...")
             individual_times = []
             # Generate additional vectors for individual creates (from pre-computed static vectors)
             dim = getattr(embedding, "dim", 1536)
@@ -520,10 +550,10 @@ class BenchmarkRunner:
                 "avg_duration": avg_create,
                 "sample_size": sample_size,
             }
-            print(f"   ✅ Avg Duration: {format_duration(avg_create)}")
+            print(f"Avg Duration: {format_duration(avg_create)}")
 
             # 3. Vector Search Performance
-            print("\n3️⃣  Vector Search (10 queries with pre-computed vectors)...")
+            print("\nVector Search (10 queries with pre-computed vectors)...")
             search_queries = [
                 "programming languages",
                 "machine learning",
@@ -557,12 +587,12 @@ class BenchmarkRunner:
                 "avg_duration": avg_search,
                 "queries": len(search_queries),
             }
-            print(f"   ✅ Avg Duration: {format_duration(avg_search)}")
-            print(f"   📊 {len(search_queries) / sum(search_times) if sum(search_times) > 0 else 0:.2f} queries/sec")
+            print(f"Avg Duration: {format_duration(avg_search)}")
+            print(f"{len(search_queries) / sum(search_times) if sum(search_times) > 0 else 0:.2f} queries/sec")
 
             # 4. Metadata-Only Search (if supported)
             if engine.supports_metadata_only:
-                print("\n4️⃣  Metadata Search (10 queries)...")
+                print("\nMetadata Search (10 queries)...")
                 metadata_times = []
                 for i in range(10):
                     duration, _ = benchmark_operation(
@@ -579,13 +609,13 @@ class BenchmarkRunner:
                     "queries": len(metadata_times),
                     "supported": True,
                 }
-                print(f"   ✅ Avg Duration: {format_duration(avg_metadata)}")
+                print(f"   Avg Duration: {format_duration(avg_metadata)}")
             else:
                 results["metadata_search"] = {"supported": False}
-                print("\n4️⃣  Metadata Search: Not supported")
+                print("\nMetadata Search: Not supported")
 
             # 4.5. Query DSL Operators Test (using Q objects)
-            print("\n4️⃣.5 Query DSL Operators (Q objects)...")
+            print("\nQuery DSL Operators (Q objects)...")
             from crossvector.querydsl import Q
 
             # For slow backends (astradb, milvus), test fewer operators
@@ -610,7 +640,7 @@ class BenchmarkRunner:
                         ),
                     ),
                 ]
-                print("   ℹ️  Testing 4 key operators (slow backend optimization)")
+                print("Testing 4 key operators (slow backend optimization)")
             else:
                 # Test all operators for fast backends
                 operator_tests = [
@@ -654,7 +684,7 @@ class BenchmarkRunner:
                     operator_times.append(duration)
                     successful_operators += 1
                 except Exception as e:
-                    print(f"  ⚠️  Operator {op_name} skipped: {e}")
+                    print(f"  Operator {op_name} skipped: {e}")
 
             if operator_times:
                 avg_operator = sum(operator_times) / len(operator_times)
@@ -664,13 +694,13 @@ class BenchmarkRunner:
                     "total_operators": len(operator_tests),
                 }
                 print(
-                    f"   ✅ Avg Duration: {format_duration(avg_operator)} ({successful_operators}/{len(operator_tests)} operators)"
+                    f"Avg Duration: {format_duration(avg_operator)} ({successful_operators}/{len(operator_tests)} operators)"
                 )
             else:
                 results["query_dsl_operators"] = {"supported": False}
 
             # 5. Update Performance (use all docs)
-            print(f"\n5️⃣  Update Operations ({self.num_docs} updates)...")
+            print(f"\nUpdate Operations ({self.num_docs} updates)...")
             update_sample = min(self.num_docs, len(upserted_docs) if upserted_docs else 0)
             if upserted_docs and update_sample > 0:
                 update_times = []
@@ -686,12 +716,12 @@ class BenchmarkRunner:
                     "avg_duration": avg_update,
                     "sample_size": update_sample,
                 }
-                print(f"   ✅ Avg Duration: {format_duration(avg_update)}")
+                print(f"   Avg Duration: {format_duration(avg_update)}")
             else:
                 results["update"] = {"error": "No documents to update"}
 
             # 6. Delete Performance (all docs, batched)
-            print(f"\n6️⃣  Delete Operations ({self.num_docs} deletes)...")
+            print(f"\nDelete Operations ({self.num_docs} deletes)...")
             delete_sample = min(self.num_docs, len(upserted_docs) if upserted_docs else 0)
             if upserted_docs and delete_sample > 0:
                 batch_size = 100
@@ -707,18 +737,18 @@ class BenchmarkRunner:
                     "sample_size": delete_sample,
                     "docs_per_sec": delete_sample / total_duration if total_duration > 0 else 0,
                 }
-                print(f"   ✅ Duration: {format_duration(total_duration)}")
-                print(f"   📊 {results['delete']['docs_per_sec']:.2f} docs/sec")
+                print(f"Duration: {format_duration(total_duration)}")
+                print(f"{results['delete']['docs_per_sec']:.2f} docs/sec")
             else:
                 results["delete"] = {"error": "No documents to delete"}
 
             # 7. Count operation
             remaining_count = engine.count()
             results["final_count"] = remaining_count
-            print(f"\n📊 Final document count: {remaining_count}")
+            print(f"\nFinal document count: {remaining_count}")
 
         except Exception as e:
-            print(f"\n❌ Benchmark failed: {e}")
+            print(f"\nBenchmark failed: {e}")
             results["error"] = str(e)
         finally:
             # Cleanup - try to drop collection (gracefully ignore if fails)
@@ -752,7 +782,7 @@ class BenchmarkRunner:
                 results = engine.search(query=vector, limit=search_limit)
                 all_results.extend(results)
             except Exception as e:
-                print(f"    ⚠️  Query failed: {e}")
+                print(f"    Query failed: {e}")
 
         elapsed = time.time() - start_time
         return elapsed, all_results
@@ -767,12 +797,12 @@ class BenchmarkRunner:
             query_vectors: Pre-computed search query vectors keyed by embedding provider
         """
         print(f"\n{'=' * 60}")
-        print("🚀 CrossVector Benchmark Suite")
+        print("CrossVector Benchmark Suite")
         print(f"{'=' * 60}")
-        print(f"📊 Documents per test: {self.num_docs}")
-        print(f"🎯 Backends: {', '.join(self.backends.keys())}")
-        print(f"🤖 Embeddings: {', '.join(self.embedding_providers.keys())}")
-        print(f"⏰ Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"Documents per test: {self.num_docs}")
+        print(f"Backends: {', '.join(self.backends.keys())}")
+        print(f"Embeddings: {', '.join(self.embedding_providers.keys())}")
+        print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
         for emb_name, emb_init_func in self.embedding_providers.items():
             embedding = emb_init_func()
@@ -803,7 +833,7 @@ class BenchmarkRunner:
                 except Exception as e:
                     # Skip failed backends gracefully instead of crashing
                     error_msg = str(e)[:100]
-                    print(f"\n⚠️  Skipping {backend_name}_{emb_name}: {error_msg}...")
+                    print(f"\nSkipping {backend_name}_{emb_name}: {error_msg}...")
                     self.results[result_key] = {"error": error_msg}
 
         return self.results
@@ -839,7 +869,7 @@ class BenchmarkRunner:
 
             f.write(f"**Test Results:** {success_tests}/{total_tests} passed")
             if error_tests > 0:
-                f.write(f", {error_tests} ❌ failed\n\n")
+                f.write(f", {error_tests} failed\n\n")
             else:
                 f.write("\n\n")
 
@@ -855,7 +885,7 @@ class BenchmarkRunner:
                     backend = result.get("backend", result_key.split("_")[0])
                     embedding = result.get("embedding", result_key.split("_")[1] if "_" in result_key else "unknown")
                     error_msg = result["error"][:50] + "..." if len(result["error"]) > 50 else result["error"]
-                    f.write(f"| {backend} | {embedding} | - | - | - | - | - | - | ❌ {error_msg} |\n")
+                    f.write(f"| {backend} | {embedding} | - | - | - | - | - | - | ERROR: {error_msg} |\n")
                     continue
 
                 backend = result.get("backend", "unknown")
@@ -879,11 +909,11 @@ class BenchmarkRunner:
                     else format_duration(delete_entry.get("duration", 0))
                 )
 
-                status_icon = "✅"
+                status_icon = "OK"
                 if (isinstance(update_entry, dict) and "error" in update_entry) or (
                     isinstance(delete_entry, dict) and "error" in delete_entry
                 ):
-                    status_icon = "⚠️"
+                    status_icon = "WARNING"
 
                 f.write(
                     f"| {backend} | {embedding} | {model} | {dim} | {bulk_create} | {search} | {update} | {delete} | {status_icon} |\n"
@@ -898,7 +928,7 @@ class BenchmarkRunner:
                 f.write(f"## {backend.upper()} + {embedding.upper()} Details\n\n")
 
                 if "error" in result:
-                    f.write(f"❌ **Error:** {result['error']}\n\n")
+                    f.write(f"**Error:** {result['error']}\n\n")
                     continue
 
                 # Embedding info
@@ -982,7 +1012,7 @@ class BenchmarkRunner:
             # Error Summary Section
             error_results = {k: v for k, v in self.results.items() if "error" in v}
             if error_results:
-                f.write("## Failed Tests ❌\n\n")
+                f.write("## Failed Tests\n\n")
                 for result_key, result in error_results.items():
                     backend = result.get("backend", result_key.split("_")[0])
                     embedding = result.get("embedding", result_key.split("_")[1] if "_" in result_key else "unknown")
@@ -997,7 +1027,27 @@ class BenchmarkRunner:
             f.write("- Times are averaged over multiple runs for stability\n")
             f.write("- Different embedding providers may have different dimensions and performance characteristics\n")
 
-        print(f"\n📄 Markdown report saved to: {output_path}")
+            f.write("\n## Important: Benchmark Results Interpretation\n\n")
+            f.write("**PgVector Local vs Cloud Backends:**\n")
+            f.write("- **PgVector results**: Benchmarked against LOCAL PostgreSQL instance\n")
+            f.write("  - Provides optimal latency with minimal network overhead\n")
+            f.write("  - Results are NOT directly comparable with cloud-hosted PgVector\n")
+            f.write("- **Cloud Backends** (AstraDB, Milvus, ChromaDB): Performance affected by:\n")
+            f.write("  - Network latency and geographic region\n")
+            f.write("  - Regional proximity between client and server\n")
+            f.write("  - Network conditions and bandwidth availability\n")
+            f.write("  - Server load and resource allocation\n\n")
+            f.write("**For Fair Comparison:**\n")
+            f.write("- Deploy all backends in the SAME REGION and NETWORK ENVIRONMENT\n")
+            f.write("- Conduct benchmarks in YOUR PRODUCTION ENVIRONMENT with real network conditions\n")
+            f.write("- Account for network latency when interpreting and comparing results\n")
+            f.write("- PgVector: Consider cloud-hosted options for fair comparison (e.g., AWS RDS, Azure Database)\n\n")
+            f.write("**Recommendation:**\n")
+            f.write("These results are specific to this test environment. For your use case, run benchmarks\n")
+            f.write("in your actual production deployment with backends in the same region and network\n")
+            f.write("conditions to get accurate, meaningful performance metrics.\n")
+
+        print(f"\nMarkdown report saved to: {output_path}")
 
 
 def main():
@@ -1065,24 +1115,24 @@ def main():
 
             if not fixture_path.exists():
                 print(f"\n{'=' * 60}")
-                print(f"📝 Fixture not found: {fixture_path}")
-                print(f"🚀 Auto-generating fixtures with {embedding_provider.upper()} embeddings...")
+                print(f"Fixture not found: {fixture_path}")
+                print(f"Auto-generating fixtures with {embedding_provider.upper()} embeddings...")
                 print(f"{'=' * 60}\n")
 
                 # Generate fixtures directly using imported functions
                 try:
                     # Generate documents and queries (same for all providers)
                     num_queries = min(args.num_docs // 10, 100)
-                    print(f"📝 Generating {args.num_docs:,} documents with nested metadata...")
+                    print(f"Generating {args.num_docs:,} documents with nested metadata...")
                     docs = generate_benchmark_docs(args.num_docs, seed=42)
-                    print(f"✅ Generated {len(docs):,} documents\n")
+                    print(f"Generated {len(docs):,} documents\n")
 
-                    print(f"🔍 Generating {num_queries:,} diverse search queries...")
+                    print(f"Generating {num_queries:,} diverse search queries...")
                     queries = generate_search_queries(num_queries, seed=42)
-                    print(f"✅ Generated {len(queries):,} queries\n")
+                    print(f"Generated {len(queries):,} queries\n")
 
                     # Generate vectors using embedding provider
-                    print(f"🤖 Generating vectors using {embedding_provider.upper()} embedding...")
+                    print(f"Generating vectors using {embedding_provider.upper()} embedding...")
                     if embedding_provider == "openai":
                         from crossvector.embeddings.openai import OpenAIEmbeddingAdapter
 
@@ -1092,8 +1142,8 @@ def main():
 
                         embedding_adapter = GeminiEmbeddingAdapter(model_name="gemini-embedding-001", dim=1536)
 
-                    print(f"   Model: {embedding_adapter.model_name}")
-                    print(f"   Dimension: {embedding_adapter.dim}")
+                    print(f"Model: {embedding_adapter.model_name}")
+                    print(f"Dimension: {embedding_adapter.dim}")
 
                     # Generate vectors in batches
                     batch_size = 500
@@ -1102,13 +1152,13 @@ def main():
                         batch = docs[i : i + batch_size]
                         batch_texts = [doc["text"] for doc in batch]
                         print(
-                            f"   Processing batch {i // batch_size + 1}/{(total_docs + batch_size - 1) // batch_size} ({len(batch)} docs)..."
+                            f"Processing batch {i // batch_size + 1}/{(total_docs + batch_size - 1) // batch_size} ({len(batch)} docs)..."
                         )
                         vectors = embedding_adapter.get_embeddings(batch_texts)
                         for doc, vector in zip(batch, vectors):
                             doc["vector"] = vector
 
-                    print(f"✅ Generated {total_docs:,} vectors using {embedding_provider.upper()}\n")
+                    print(f"Generated {total_docs:,} vectors using {embedding_provider.upper()}\n")
 
                     # Save to file
                     fixture_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1132,11 +1182,11 @@ def main():
                         json.dump(fixtures, f, indent=2)
 
                     file_size_mb = fixture_path.stat().st_size / 1024 / 1024
-                    print(f"✅ Fixtures saved: {fixture_path} ({file_size_mb:.1f} MB)\n")
+                    print(f"Fixtures saved: {fixture_path} ({file_size_mb:.1f} MB)\n")
 
                 except Exception as e:
-                    print(f"⚠️  Failed to generate fixtures for {embedding_provider}: {e}")
-                    print("   Will try to continue with other providers...\n")
+                    print(f"Failed to generate fixtures for {embedding_provider}: {e}")
+                    print("Will try to continue with other providers...\n")
 
     # Load test documents from fixtures (if using --use-fixtures)
     # Otherwise, fixtures were already generated above for each provider
@@ -1147,24 +1197,24 @@ def main():
     if args.use_fixtures:
         fixture_path = Path(args.use_fixtures)
         if fixture_path.exists():
-            print(f"📂 Loading fixtures from {fixture_path}...")
+            print(f"Loading fixtures from {fixture_path}...")
             try:
                 test_docs, search_queries = load_fixtures_from_file(
                     str(fixture_path), args.num_docs, add_vectors=args.add_vectors
                 )
                 print(f"{'=' * 60}")
             except (FileNotFoundError, json.JSONDecodeError) as e:
-                print(f"❌ Failed to load fixtures: {e}")
+                print(f"Failed to load fixtures: {e}")
                 print(f"{'=' * 60}")
                 return
         else:
-            print(f"❌ Fixtures file not found: {fixture_path}")
+            print(f"Fixtures file not found: {fixture_path}")
             print(f"{'=' * 60}")
             return
     else:
         # Fixtures already generated per provider above
         # We'll load them per-provider in the benchmark loop
-        print("📝 Fixtures generated for each embedding provider")
+        print("Fixtures generated for each embedding provider")
         print(f"{'=' * 60}")
 
     # Create BenchmarkRunner instance
@@ -1188,7 +1238,7 @@ def main():
                     docs, queries = load_fixtures_from_file(str(fixture_path), args.num_docs, add_vectors=False)
                     fixtures_by_provider[emb_name] = {"docs": docs, "queries": queries}
                 except Exception as e:
-                    print(f"⚠️  Failed to load fixtures for {emb_name}: {e}")
+                    print(f"Failed to load fixtures for {emb_name}: {e}")
     else:
         # Use the same fixtures for all providers (from --use-fixtures)
         for emb_name in runner.embedding_providers.keys():
@@ -1203,17 +1253,17 @@ def main():
             dim = getattr(embedding, "dim", 1536)
             queries_list = fixtures_by_provider[emb_name]["queries"]
             query_vectors_by_embedding[emb_name] = runner._precompute_query_vectors(queries_list, dim)
-            print(f"✅ Pre-computed query vectors for {emb_name} (dim={dim})")
+            print(f"Pre-computed query vectors for {emb_name} (dim={dim})")
 
     # Run benchmarks with fixtures per provider
     # Modified run_all to handle per-provider fixtures
     print(f"\n{'=' * 60}")
-    print("🚀 CrossVector Benchmark Suite")
+    print("CrossVector Benchmark Suite")
     print(f"{'=' * 60}")
-    print(f"📊 Documents per test: {args.num_docs}")
-    print(f"🎯 Backends: {', '.join(runner.backends.keys())}")
-    print(f"🤖 Embeddings: {', '.join(runner.embedding_providers.keys())}")
-    print(f"⏰ Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Documents per test: {args.num_docs}")
+    print(f"Backends: {', '.join(runner.backends.keys())}")
+    print(f"Embeddings: {', '.join(runner.embedding_providers.keys())}")
+    print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     for emb_name, emb_init_func in runner.embedding_providers.items():
         embedding = emb_init_func()
@@ -1246,14 +1296,14 @@ def main():
             except Exception as e:
                 # Skip failed backends gracefully instead of crashing
                 error_msg = str(e)[:100]
-                print(f"\n⚠️  Skipping {backend_name}_{emb_name}: {error_msg}...")
+                print(f"\nSkipping {backend_name}_{emb_name}: {error_msg}...")
                 runner.results[result_key] = {"error": error_msg}
 
     # Generate report
     runner.generate_markdown_report(output_file=args.output)
 
     print(f"\n{'=' * 60}")
-    print("✅ Benchmark completed!")
+    print("Benchmark completed!")
     print(f"{'=' * 60}\n")
 
 
