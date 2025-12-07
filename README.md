@@ -1010,26 +1010,44 @@ VectorDocument Results
   - Production-ready documentation
   - Performance benchmarks
 
-- [ ] **Additional Backends**
+- [ ] **v1.1 - Advanced Search Features (HIGH PRIORITY)**
+  - Hybrid search (vector + keyword/BM25)
+  - Reranking support (Cohere, Jina)
+  - Pagination helpers with cursor-based navigation
+  - Query optimization and caching strategies
+
+- [ ] **v1.2 - Migration & Backup (HIGH PRIORITY)**
+  - Collection migration between backends (`migrate_to()`, `clone_to()`)
+  - Backup and restore to files (`backup_to_file()`, `restore_from_file()`)
+  - Fork collections with metadata filtering (`fork()`)
+  - CLI tools for migration, backup, and restore operations
+  - Verification and integrity checks during migration
+  - **List to scalar field conversion utilities** (workaround for limited list field support)
+    - Auto-convert list fields to pipe-separated strings or JSON strings
+    - Helper methods for tags/categories: `tags__contains`, `tags__overlap`
+    - Migration tool to convert existing list fields to scalar format
+
+- [ ] **v1.3 - Advanced Migration Features**
+  - Incremental sync between collections (`sync_to()`)
+  - Multi-region replication helpers
+  - Differential backup and restore
+  - CLI advanced features (diff, health check, schema compare)
+  - Progress tracking and resumable migrations
+
+- [ ] **v1.4 - Developer Experience**
+  - Async/await support for high-throughput operations
+  - Streaming search results
+  - Interactive query builder
+  - Schema validation and linting
+  - Enhanced CLI with autocomplete and interactive mode
+
+- [ ] **v2.0 - Additional Backends**
   - Pinecone
   - Weaviate
   - Qdrant
-  - MongoDB
+  - MongoDB Atlas Vector Search
   - Elasticsearch
   - OpenSearch
-
-- [ ] **Enhanced Features**
-  - Hybrid search (vector + keyword)
-  - Reranking support (Cohere, Jina)
-  - Async/await support
-  - Streaming search results
-  - Pagination helpers
-
-- [ ] **Developer Experience**
-  - CLI tool for management
-  - Migration utilities
-  - Schema validation and linting
-  - Interactive query builder
 
 ---
 
