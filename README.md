@@ -1075,4 +1075,4 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and migration guides.
 
 ---
 
-**Made with ❤️ by the [The Two Farm](https://www.linkedin.com/in/thetwofarm/)****
+**Made with ❤️ by the [The Two Farm](https://www.linkedin.com/in/thetwofarm/)**
