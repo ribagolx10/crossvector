@@ -9,19 +9,19 @@
 
 CrossVector provides a consistent, high-level API across multiple vector databases (AstraDB, ChromaDB, Milvus, PgVector) and embedding providers (OpenAI, Gemini), allowing you to switch between backends without rewriting your application code.
 
-## 🎯 Recommended Backends
+## Recommended Backends
 
 Based on our comprehensive benchmarking, we recommend:
 
 ### **For Production:**
 
-- **🥇 ChromaDB Cloud** - Best for cloud deployments
+- **ChromaDB Cloud** - Best for cloud deployments
   - Hosted solution with excellent performance
   - Easy setup and management
   - Built-in scaling and backups
   - Good for: SaaS applications, MVPs, rapid prototyping
 
-- **🥈 PgVector** - Best for self-hosted/on-premise
+- **PgVector** - Best for self-hosted/on-premise
   - Excellent performance (6-10 docs/sec bulk insert)
   - Very fast metadata queries (<1ms)
   - PostgreSQL reliability and ecosystem
@@ -38,14 +38,21 @@ See our [benchmarking guide](docs/benchmarking.md) for detailed performance comp
 
 | Backend | Embedding | Model | Dim | Upsert | Search (avg) | Update (avg) | Delete (batch) | Status |
 |---------|-----------|-------|-----|--------|--------------|--------------|----------------|--------|
-| pgvector | openai | text-embedding-3-small | 1536 | 7.06s | 21.26ms | 6.21ms | 22.63ms | ✅ |
-| astradb | openai | text-embedding-3-small | 1536 | 18.89s | 23.86s | 1.11s | 15.15s | ✅ |
-| milvus | openai | text-embedding-3-small | 1536 | 7.94s | 654.43ms | 569.52ms | 2.17s | ✅ |
-| chroma | openai | text-embedding-3-small | 1536 | 17.08s | 654.76ms | 1.23s | 4.73s | ✅ |
-| pgvector | gemini | models/gemini-embedding-001 | 1536 | 6.65s | 18.72ms | 6.40ms | 20.25ms | ✅ |
-| astradb | gemini | models/gemini-embedding-001 | 1536 | 11.25s | 6.71s | 903.37ms | 15.05s | ✅ |
-| milvus | gemini | models/gemini-embedding-001 | 1536 | 6.14s | 571.90ms | 561.38ms | 1.91s | ✅ |
-| chroma | gemini | models/gemini-embedding-001 | 1536 | 18.93s | 417.28ms | 1.24s | 4.63s | ✅ |
+| pgvector | openai | text-embedding-3-small | 1536 | 7.06s | 21.26ms | 6.21ms | 22.63ms | Yes |
+| astradb | openai | text-embedding-3-small | 1536 | 18.89s | 23.86s | 1.11s | 15.15s | Yes |
+| milvus | openai | text-embedding-3-small | 1536 | 7.94s | 654.43ms | 569.52ms | 2.17s | Yes |
+| chroma | openai | text-embedding-3-small | 1536 | 17.08s | 654.76ms | 1.23s | 4.73s | Yes |
+| pgvector | gemini | models/gemini-embedding-001 | 1536 | 6.65s | 18.72ms | 6.40ms | 20.25ms | Yes |
+| astradb | gemini | models/gemini-embedding-001 | 1536 | 11.25s | 6.71s | 903.37ms | 15.05s | Yes |
+| milvus | gemini | models/gemini-embedding-001 | 1536 | 6.14s | 571.90ms | 561.38ms | 1.91s | Yes |
+| chroma | gemini | models/gemini-embedding-001 | 1536 | 18.93s | 417.28ms | 1.24s | 4.63s | Yes |
+
+> **Important Benchmark Notes:**
+>
+> - **PgVector**: Benchmarks run against a **local PostgreSQL instance**, providing optimal latency. For fair comparison with cloud backends, ensure PgVector is deployed in the **same region and network environment**.
+> - **Cloud Backends** (AstraDB, Milvus, ChromaDB): Results are affected by **network latency** and **regional proximity**. Cloud-hosted PgVector will have different performance characteristics depending on region, network conditions, and infrastructure proximity.
+> - **Recommendations**: When comparing results, ensure all backends are deployed in the **same region** and **similar network conditions** for objective evaluation.
+> - For production deployments, conduct benchmarks in your **actual production environment** with real network conditions.
 
 Full results: [`benchmark.md`](benchmark.md).
 
@@ -53,42 +60,42 @@ Full results: [`benchmark.md`](benchmark.md).
 
 ## Features
 
-### 🔌 Pluggable Architecture
+### Pluggable Architecture
 
 - **4 Vector Databases**: AstraDB, ChromaDB, Milvus, PgVector
 - **2 Embedding Providers**: OpenAI, Gemini
 - Switch backends without code changes
 - Lazy initialization pattern for optimal resource usage
 
-### 🎯 Unified API
+### Unified API
 
 - Consistent interface across all adapters
 - Django-style `get`, `get_or_create`, `update_or_create` semantics
 - Flexible document input formats: `str`, `dict`, or `VectorDocument`
 - Standardized error handling with contextual exceptions
 
-### 🔍 Advanced Querying
+### Advanced Querying
 
 - **Query DSL**: Type-safe filter composition with `Q` objects
 - **Universal operators**: `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`
 - **Nested metadata**: Dot-notation paths for hierarchical data
 - **Metadata-only search**: Query without vector similarity (where supported)
 
-### 🚀 Performance Optimized
+### Performance Optimized
 
 - Automatic batch embedding generation
 - Bulk operations: `bulk_create`, `bulk_update`, `upsert`
 - Configurable batch sizes and conflict resolution
 - Lazy client initialization for faster startup
 
-### 🛡️ Type-Safe & Validated
+### Type-Safe & Validated
 
 - Full Pydantic v2 validation
 - Structured exceptions with detailed context
 - Centralized logging with configurable levels
 - Explicit configuration validation with helpful error messages
 
-### ⚙️ Flexible Configuration
+### Flexible Configuration
 
 - Environment variable support via `.env`
 - Multiple primary key strategies: UUID, hash-based, int64, custom
@@ -142,7 +149,7 @@ pip install crossvector[astradb,all-embeddings]
 
 ## Quick Start
 
-> 💡 **Recommended**: Use `GeminiEmbeddingAdapter` for most use cases - free tier, faster search (1.5x), smaller vectors (768 vs 1536 dims). See [benchmarks](benchmark.md) for details.
+> **Recommended**: Use `GeminiEmbeddingAdapter` for most use cases - free tier, faster search (1.5x). See [benchmarks](benchmark.md) for details.
 
 ### Basic Usage
 
@@ -153,7 +160,7 @@ from crossvector.dbs.pgvector import PgVectorAdapter
 
 # Initialize engine with Gemini (recommended: free tier, fast performance)
 engine = VectorEngine(
-    embedding=GeminiEmbeddingAdapter(),  # Free tier, 1536-dim vectors
+    embedding=GeminiEmbeddingAdapter(),  # Free tier, 1536-dim vectors (default)
     db=PgVectorAdapter(),
     collection_name="my_documents",
     store_text=True
@@ -476,11 +483,11 @@ Different backends have varying feature support:
 
 | Feature | AstraDB | ChromaDB | Milvus | PgVector |
 |---------|---------|----------|--------|----------|
-| Vector Search | ✅ | ✅ | ✅ | ✅ |
-| Metadata-Only Search | ✅ | ✅ | ✅ | ✅ |
-| Nested Metadata | ✅ | ✅ | ✅ | ✅ |
-| Numeric Comparisons | ✅ | ✅ | ✅ | ✅ |
-| Text Storage | ✅ | ✅ | ✅ | ✅ |
+| Vector Search | Yes | Yes | Yes | Yes |
+| Metadata-Only Search | Yes | Yes | Yes | Yes |
+| Nested Metadata | Yes | Yes | Yes | Yes |
+| Numeric Comparisons | Yes | Yes | Yes | Yes |
+| Text Storage | Yes | Yes | Yes | Yes |
 
 *ChromaDB supports nested metadata via dot-notation when metadata is flattened.
 
@@ -562,7 +569,7 @@ engine = VectorEngine(embedding=embedding, db=db)
 
 ## Embedding Providers
 
-> 💡 **Recommended**: Start with **Gemini** for free tier and faster performance. See [benchmark comparison](benchmark.md).
+> **Recommended**: Start with **Gemini** for free tier and faster performance. See [benchmark comparison](benchmark.md).
 
 ### Gemini (Recommended)
 
@@ -577,10 +584,10 @@ embedding = GeminiEmbeddingAdapter(model_name="models/text-embedding-004", dim=7
 ```
 
 **Why Choose Gemini:**
-- ✅ **Free tier**: 1,500 requests/min (vs OpenAI paid only)
-- ✅ **Faster search**: 234ms avg (1.5x faster than OpenAI)
-- ✅ **Efficient**: 768 dims = 50% less storage than OpenAI
-- ✅ **Quality**: Comparable accuracy to OpenAI
+- **Free tier**: 1,500 requests/min (vs OpenAI paid only)
+- **Faster search**: 234ms avg (1.5x faster than OpenAI)
+- **Flexible dims**: 768, 1536, or 3072 with gemini-embedding-001
+- **Quality**: Comparable accuracy to OpenAI
 
 **Configuration:**
 ```bash
@@ -588,8 +595,10 @@ GEMINI_API_KEY=AI...  # Get free key at https://makersuite.google.com/app/apikey
 ```
 
 **Supported Models:**
-- `gemini-embedding-001` (768 dims, **recommended**)
-- `models/text-embedding-004` (768 dims)
+- `gemini-embedding-001` (1536 dims default, supports 768/1536/3072, **recommended**)
+- `text-embedding-005` (768 dims, English and code)
+- `text-multilingual-embedding-002` (768 dims, multilingual)
+- `text-embedding-004` (768 dims, legacy English)
 
 ### OpenAI (Alternative)
 
@@ -604,9 +613,9 @@ embedding = OpenAIEmbeddingAdapter(model_name="text-embedding-3-large")
 ```
 
 **When to Use OpenAI:**
-- ✅ Need 1536 or 3072 dimensions
-- ✅ Already have OpenAI API budget
-- ✅ Prefer OpenAI ecosystem integration
+- Need 1536 or 3072 dimensions
+- Already have OpenAI API budget
+- Prefer OpenAI ecosystem integration
 
 **Configuration:**
 ```bash
@@ -617,10 +626,6 @@ OPENAI_API_KEY=sk-...  # Paid API key from https://platform.openai.com
 - `text-embedding-3-small` (1536 dims, default)
 - `text-embedding-3-large` (3072 dims)
 - `text-embedding-ada-002` (1536 dims, legacy)
-
-- `gemini-embedding-001` (1536 dims, default)
-- `text-embedding-005` (768 dims)
-- `text-embedding-004` (768 dims, legacy)
 
 ---
 
@@ -809,14 +814,14 @@ The benchmark tool measures performance across 7 key operations:
 ```markdown
 | Backend | Embedding | Model | Dim | Bulk Create | Search (avg) | Update (avg) | Delete (batch) | Status |
 |---------|-----------|-------|-----|-------------|--------------|--------------|----------------|--------|
-| pgvector | openai | text-embedding-3-small | 1536 | 2.68s | 515.47ms | 6.48ms | 1.76ms | ✅ |
-| astradb | openai | text-embedding-3-small | 1536 | 32.56s | 1.09s | 875.63ms | 1.44s | ✅ |
-| milvus | openai | text-embedding-3-small | 1536 | 21.24s | 1.04s | 551.36ms | 180.25ms | ✅ |
-| chroma | openai | text-embedding-3-small | 1536 | 36.08s | 900.75ms | 2.51s | 521.35ms | ✅ |
-| pgvector | gemini | models/gemini-embedding-001 | 1536 | 31.50s | 65.29ms | 6.14ms | 1.78ms | ✅ |
-| astradb | gemini | models/gemini-embedding-001 | 1536 | 1m 2.65s | 882.48ms | 818.93ms | 1.44s | ✅ |
-| milvus | gemini | models/gemini-embedding-001 | 1536 | 50.26s | 835.50ms | 572.62ms | 224.16ms | ✅ |
-| chroma | gemini | models/gemini-embedding-001 | 1536 | 1m 3.39s | 628.08ms | 3.16s | 394.21ms | ✅ |
+| pgvector | openai | text-embedding-3-small | 1536 | 2.68s | 515.47ms | 6.48ms | 1.76ms | Yes |
+| astradb | openai | text-embedding-3-small | 1536 | 32.56s | 1.09s | 875.63ms | 1.44s | Yes |
+| milvus | openai | text-embedding-3-small | 1536 | 21.24s | 1.04s | 551.36ms | 180.25ms | Yes |
+| chroma | openai | text-embedding-3-small | 1536 | 36.08s | 900.75ms | 2.51s | 521.35ms | Yes |
+| pgvector | gemini | models/gemini-embedding-001 | 1536 | 31.50s | 65.29ms | 6.14ms | 1.78ms | Yes |
+| astradb | gemini | models/gemini-embedding-001 | 1536 | 1m 2.65s | 882.48ms | 818.93ms | 1.44s | Yes |
+| milvus | gemini | models/gemini-embedding-001 | 1536 | 50.26s | 835.50ms | 572.62ms | 224.16ms | Yes |
+| chroma | gemini | models/gemini-embedding-001 | 1536 | 1m 3.39s | 628.08ms | 3.16s | 394.21ms | Yes |
 ```
 
 ### Requirements
@@ -859,7 +864,7 @@ Results are saved to `benchmark.md` (or custom path) with:
 
 **Example output:**
 ```
-📄 Markdown report saved to: benchmark.md
+Markdown report saved to: benchmark.md
 ```
 
 See [benchmarking documentation](docs/benchmarking.md) for more details.
@@ -1070,4 +1075,4 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and migration guides.
 
 ---
 
-**Made with ❤️ by the [Two Farm](https://www.linkedin.com/in/thetwofarm/)**
+**Made with ❤️ by the [The Two Farm](https://www.linkedin.com/in/thetwofarm/)****

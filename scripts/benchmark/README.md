@@ -132,10 +132,10 @@ python scripts/benchmark/run.py --use-fixtures scripts/benchmark/fixtures.json -
 
 ### Benefits
 
-✅ **Cost-effective**: No OpenAI/Gemini API calls for embedding
-✅ **Fast testing**: Static vectors generated instantly
-✅ **Reproducible**: Fixed seed ensures consistent vectors
-✅ **Scalable**: Test with 1000+ documents for pennies
+- **Cost-effective**: No OpenAI/Gemini API calls for embedding
+- **Fast testing**: Static vectors generated instantly
+- **Reproducible**: Fixed seed ensures consistent vectors
+- **Scalable**: Test with 1000+ documents for pennies
 
 ### Example Workflow
 

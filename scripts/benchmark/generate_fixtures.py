@@ -307,27 +307,27 @@ Examples:
 
     # Generate fixtures
     print("\n" + "=" * 70)
-    print("🚀 Generating Benchmark Fixtures")
+    print("Generating Benchmark Fixtures")
     print("=" * 70)
-    print(f"📊 Documents: {args.docs:,}")
-    print(f"🔍 Queries: {args.queries:,}")
-    print(f"💾 Output: {args.output}")
-    print(f"🌱 Seed: {args.seed}")
+    print(f"Documents: {args.docs:,}")
+    print(f"Queries: {args.queries:,}")
+    print(f"Output: {args.output}")
+    print(f"Seed: {args.seed}")
     if args.add_vectors:
-        print(f"🤖 Embedding: {args.embedding_provider.upper()}")
+        print(f"Embedding: {args.embedding_provider.upper()}")
     print("=" * 70 + "\n")
 
-    print(f"📝 Generating {args.docs:,} documents with nested metadata...")
+    print(f"Generating {args.docs:,} documents with nested metadata...")
     docs = generate_benchmark_docs(args.docs, seed=args.seed)
-    print(f"✅ Generated {len(docs):,} documents\n")
+    print(f"Generated {len(docs):,} documents\n")
 
-    print(f"🔍 Generating {args.queries:,} diverse search queries...")
+    print(f"Generating {args.queries:,} diverse search queries...")
     queries = generate_search_queries(args.queries, seed=args.seed)
-    print(f"✅ Generated {len(queries):,} queries\n")
+    print(f"Generated {len(queries):,} queries\n")
 
     # Generate vectors if requested
     if args.add_vectors:
-        print(f"🤖 Generating vectors using {args.embedding_provider.upper()} embedding...")
+        print(f"Generating vectors using {args.embedding_provider.upper()} embedding...")
 
         try:
             if args.embedding_provider == "openai":
@@ -359,17 +359,17 @@ Examples:
                 for doc, vector in zip(batch, vectors):
                     doc["vector"] = vector
 
-            print(f"✅ Generated {total_docs:,} vectors using {args.embedding_provider.upper()}\n")
+            print(f"Generated {total_docs:,} vectors using {args.embedding_provider.upper()}\n")
 
         except Exception as e:
-            print(f"⚠️  Failed to generate vectors: {e}")
+            print(f"Failed to generate vectors: {e}")
             print("   Fixtures will be saved without vectors\n")
 
     # Calculate statistics
     total_text_length = sum(len(doc["text"]) for doc in docs)
     avg_text_length = total_text_length / len(docs)
 
-    print("📊 Fixture Statistics:")
+    print("Fixture Statistics:")
     print(f"  • Total documents: {len(docs):,}")
     print(f"  • Total queries: {len(queries):,}")
     print(f"  • Avg text length: {avg_text_length:.0f} chars")
@@ -400,12 +400,12 @@ Examples:
     file_size_mb = output_path.stat().st_size / 1024 / 1024
 
     print("=" * 70)
-    print("✅ Fixtures Generated Successfully!")
+    print("Fixtures Generated Successfully!")
     print("=" * 70)
-    print(f"📁 File: {output_path.absolute()}")
-    print(f"💾 Size: {file_size_mb:.1f} MB")
-    print(f"📝 Documents: {len(docs):,}")
-    print(f"🔍 Queries: {len(queries):,}")
+    print(f"File: {output_path.absolute()}")
+    print(f"Size: {file_size_mb:.1f} MB")
+    print(f"Documents: {len(docs):,}")
+    print(f"Queries: {len(queries):,}")
     print("=" * 70 + "\n")
 
     print("💡 Usage in benchmark:")

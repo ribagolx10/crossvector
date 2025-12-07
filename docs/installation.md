@@ -78,6 +78,30 @@ pip install crossvector[all]
 
 This includes all backends and all embedding providers.
 
+### 6. From Git Repository
+
+Install directly from the GitHub repository:
+
+```bash
+# Latest main branch
+pip install git+https://github.com/thewebscraping/crossvector.git
+
+# With specific extras
+pip install git+https://github.com/thewebscraping/crossvector.git#egg=crossvector[astradb,openai]
+
+# Specific branch
+pip install git+https://github.com/thewebscraping/crossvector.git@main#egg=crossvector[all]
+
+# Specific tag/version
+pip install git+https://github.com/thewebscraping/crossvector.git@v1.0.0#egg=crossvector
+```
+
+This is useful for:
+
+- Testing development versions before release
+- Contributing to the project
+- Using features from a specific branch
+
 ## Optional Dependencies Reference
 
 ### Database Adapters
@@ -86,7 +110,7 @@ This includes all backends and all embedding providers.
 |-------|----------|----------|
 | `astradb` | `astrapy>=2.1.0` | AstraDB serverless |
 | `chromadb` | `chromadb>=1.3.4` | ChromaDB cloud/local |
-| `milvus` | `pymilvus>=2.6.3` | Milvus/Zilliz cloud |
+| `milvus` | `pymilvus>=2.6.4` | Milvus/Zilliz cloud |
 | `pgvector` | `pgvector>=0.4.1`, `psycopg2-binary>=2.9.11` | PostgreSQL with pgvector extension |
 | `all-dbs` | All of the above | All backends |
 
@@ -122,7 +146,7 @@ print(crossvector.__version__)
 from crossvector import VectorEngine, VectorDocument
 from crossvector.querydsl.q import Q
 
-print("✅ CrossVector installed successfully!")
+print("CrossVector installed successfully!")
 ```
 
 ## Upgrading
@@ -133,10 +157,10 @@ To upgrade to the latest version:
 pip install --upgrade crossvector[your-extras]
 ```
 
-**Important**: During beta, pin to specific versions to avoid breaking changes:
+**Important**: Pin to specific versions for reproducible environments:
 
 ```bash
-pip install crossvector[astradb,openai]==0.1.0
+pip install crossvector[astradb,openai]==1.0.0
 ```
 
 ## Troubleshooting
@@ -175,7 +199,7 @@ pip install crossvector[your-extras]
 For reproducible environments, use a requirements.txt:
 
 ```txt
-crossvector[astradb,openai]==0.1.0
+crossvector[astradb,openai]==1.0.0
 # Or with specific dependencies
 astrapy==2.1.0
 openai==2.6.1
